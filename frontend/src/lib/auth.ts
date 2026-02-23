@@ -42,3 +42,14 @@ export function clearTempTwoFactorToken(): void {
   }
   window.sessionStorage.removeItem(TEMP_2FA_TOKEN_KEY);
 }
+
+export function getAuthHeaders(): HeadersInit {
+  const token = getAccessToken();
+  if (!token) {
+    return {};
+  }
+
+  return {
+    Authorization: `Bearer ${token}`,
+  };
+}

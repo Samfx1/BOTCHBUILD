@@ -11,6 +11,7 @@ export default function RegisterPage() {
   const router = useRouter();
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
+  const [role, setRole] = useState<"investor" | "developer">("investor");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -26,6 +27,7 @@ export default function RegisterPage() {
         body: JSON.stringify({
           fullName,
           email,
+          role,
           password,
         }),
       });
@@ -72,6 +74,20 @@ export default function RegisterPage() {
               onChange={(event) => setEmail(event.target.value)}
               required
             />
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium">Account type</span>
+            <select
+              className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-teal-600 dark:border-slate-700 dark:bg-slate-950"
+              value={role}
+              onChange={(event) =>
+                setRole(event.target.value as "investor" | "developer")
+              }
+            >
+              <option value="investor">Investor</option>
+              <option value="developer">Developer</option>
+            </select>
           </label>
 
           <label className="block">

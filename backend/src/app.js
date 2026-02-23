@@ -12,12 +12,52 @@ const { PostgresAuthRepository } = require("./modules/auth/auth.repository");
 const { createAuthRouter } = require("./modules/auth/auth.routes");
 const { createAuthService } = require("./modules/auth/auth.service");
 const { createHealthRouter } = require("./modules/health/health.routes");
+const { PostgresInvestmentsRepository } = require("./modules/investments/investments.repository");
+const { createInvestmentsRouter } = require("./modules/investments/investments.routes");
+const { createInvestmentsService } = require("./modules/investments/investments.service");
+const { PostgresNotificationsRepository } = require("./modules/notifications/notifications.repository");
+const { createNotificationsRouter } = require("./modules/notifications/notifications.routes");
+const { createNotificationsService } = require("./modules/notifications/notifications.service");
+const { PostgresPaymentsRepository } = require("./modules/payments/payments.repository");
+const { createPaymentsRouter } = require("./modules/payments/payments.routes");
+const { createPaymentsService } = require("./modules/payments/payments.service");
+const { PostgresProjectsRepository } = require("./modules/projects/projects.repository");
+const { createProjectsRouter } = require("./modules/projects/projects.routes");
+const { createProjectsService } = require("./modules/projects/projects.service");
 const { createUserRouter } = require("./modules/user/user.routes");
 
 function createApp(options = {}) {
-  const repository =
+  const authRepository =
     options.authRepository ?? new PostgresAuthRepository({ pool });
-  const authService = createAuthService({ authRepository: repository });
+  const projectsRepository =
+    options.projectsRepository ?? new PostgresProjectsRepository({ pool });
+  const investmentsRepository =
+    options.investmentsRepository ?? new PostgresInvestmentsRepository({ pool });
+  const paymentsRepository =
+    options.paymentsRepository ?? new PostgresPaymentsRepository({ pool });
+  const notificationsRepository =
+    options.notificationsRepository ?? new PostgresNotificationsRepository({ pool });
+
+  const authService = createAuthService({ authRepository });
+  const notificationsService = createNotificationsService({
+    notificationsRepository,
+  });
+  const projectsService = createProjectsService({
+    projectsRepository,
+    investmentsRepository,
+    notificationsService,
+  });
+  const investmentsService = createInvestmentsService({
+    investmentsRepository,
+    projectsRepository,
+    notificationsService,
+  });
+  const paymentsService = createPaymentsService({
+    env,
+    paymentsRepository,
+    investmentsRepository,
+    notificationsService,
+  });
 
   const app = express();
 
@@ -44,13 +84,23 @@ function createApp(options = {}) {
     res.json({
       service: "botchbuild-api",
       status: "ok",
-      phase: "phase-1-foundation",
+      phase: "phase-2-core-modules",
     });
   });
 
   app.use("/api/v1/health", createHealthRouter());
   app.use("/api/v1/auth", createAuthRouter({ authService }));
-  app.use("/api/v1/users", createUserRouter({ authRepository: repository }));
+  app.use("/api/v1/users", createUserRouter({ authRepository }));
+  app.use("/api/v1/projects", createProjectsRouter({ projectsService }));
+  app.use(
+    "/api/v1/investments",
+    createInvestmentsRouter({ investmentsService }),
+  );
+  app.use("/api/v1/payments", createPaymentsRouter({ paymentsService }));
+  app.use(
+    "/api/v1/notifications",
+    createNotificationsRouter({ notificationsService }),
+  );
 
   app.use((_req, res) => {
     res.status(404).json({

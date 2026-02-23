@@ -27,6 +27,7 @@ function createAuthService({ authRepository }) {
       fullName: input.fullName,
       email: input.email,
       passwordHash,
+      role: input.role,
     });
 
     return {

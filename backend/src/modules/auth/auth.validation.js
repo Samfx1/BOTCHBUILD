@@ -6,6 +6,7 @@ const strongPasswordRegex =
 const registerSchema = z.object({
   fullName: z.string().trim().min(2).max(120),
   email: z.string().trim().email().max(255).transform((value) => value.toLowerCase()),
+  role: z.enum(["investor", "developer"]).default("investor"),
   password: z
     .string()
     .min(12)

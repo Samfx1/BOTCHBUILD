@@ -23,6 +23,7 @@ const envSchema = z.object({
     .min(32)
     .default("dev-2fa-secret-value-should-be-overridden"),
   JWT_2FA_EXPIRES_IN: z.string().default("5m"),
+  PAYMENT_WEBHOOK_SECRET: z.string().min(8).default("local-dev-webhook-secret"),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -1,11 +1,13 @@
-# Botch Build Platform (Phase 1 Foundation)
+# Botch Build Platform (Phases 1-2)
 
-Secure, full-stack foundation for a diaspora-focused real estate investment
-platform that supports:
+Secure, full-stack platform baseline for a diaspora-focused real estate
+investment application that supports:
 
 - Investor/developer account onboarding
-- JWT authentication
-- Time-based one-time password (TOTP) 2FA
+- JWT authentication + TOTP 2FA
+- Project creation and progress tracking
+- Investment creation and payment initialization (Stripe/Paystack-ready)
+- Notification feeds and channel preferences
 - PostgreSQL-backed domain schema
 - Dockerized local development
 
@@ -83,6 +85,33 @@ npm run dev --prefix frontend
 
 - `GET /api/v1/users/me` (Bearer token required)
 
+### Projects
+
+- `GET /api/v1/projects`
+- `GET /api/v1/projects/:projectId`
+- `POST /api/v1/projects` (developer/admin)
+- `GET /api/v1/projects/:projectId/updates`
+- `POST /api/v1/projects/:projectId/updates` (owner/admin)
+
+### Investments
+
+- `POST /api/v1/investments`
+- `GET /api/v1/investments/me`
+- `GET /api/v1/investments/:investmentId`
+
+### Payments
+
+- `POST /api/v1/payments/initialize`
+- `GET /api/v1/payments/:transactionId`
+- `POST /api/v1/payments/webhook/:provider`
+
+### Notifications
+
+- `GET /api/v1/notifications/me`
+- `GET /api/v1/notifications/preferences`
+- `PUT /api/v1/notifications/preferences`
+- `POST /api/v1/notifications/test`
+
 ## Running test suites
 
 ```bash
@@ -101,7 +130,9 @@ npm run migrate --prefix backend
 Current baseline migration:
 
 - `backend/migrations/001_phase1_foundation.sql`
+- `backend/migrations/002_phase2_core_modules.sql`
 
 ## Phase documentation
 
 - `docs/PHASE1_FOUNDATION.md`
+- `docs/PHASE2_CORE_MODULES.md`

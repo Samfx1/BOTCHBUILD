@@ -11,8 +11,9 @@ export default function Home() {
           Secure diaspora investment portal for Ghana real estate projects
         </h1>
         <p className="max-w-3xl text-slate-600 dark:text-slate-300">
-          Foundation release includes account creation, JWT authentication, and
-          optional 2FA setup for safer remote investment access.
+          Foundation + Phase 2 release includes account security, project
+          discovery, investor payment initialization, progress updates, and
+          notification controls.
         </p>
         <div className="flex flex-wrap gap-3">
           <Link
@@ -32,6 +33,12 @@ export default function Home() {
             className="rounded-md border border-slate-300 px-5 py-3 text-sm font-semibold hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
           >
             Dashboard
+          </Link>
+          <Link
+            href="/projects"
+            className="rounded-md border border-slate-300 px-5 py-3 text-sm font-semibold hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+          >
+            Projects
           </Link>
         </div>
       </main>

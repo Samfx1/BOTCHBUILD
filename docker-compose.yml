@@ -35,6 +35,7 @@ services:
       JWT_ACCESS_EXPIRES_IN: 15m
       JWT_2FA_SECRET: ${JWT_2FA_SECRET:-change-me-2fa-secret-at-least-32-characters}
       JWT_2FA_EXPIRES_IN: 5m
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-local-dev-webhook-secret}
     ports:
       - "4000:4000"
     command: sh -c "npm run migrate && npm run dev"
