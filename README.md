@@ -82,6 +82,22 @@ npm install --prefix frontend
 npm run dev --prefix frontend
 ```
 
+### One-command local preview
+
+If PostgreSQL is already running locally, you can start backend + worker +
+frontend together:
+
+```bash
+npm run preview
+```
+
+This script creates missing local env files, installs dependencies, runs
+migrations, and streams process logs to:
+
+- `.preview-logs/backend.log`
+- `.preview-logs/worker.log`
+- `.preview-logs/frontend.log`
+
 ## Backend API summary
 
 ### Auth
