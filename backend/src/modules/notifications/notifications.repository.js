@@ -81,6 +81,62 @@ class PostgresNotificationsRepository {
     return result.rows[0];
   }
 
+  async findNotificationById(notificationId) {
+    const query = `
+      SELECT
+        id,
+        recipient_user_id,
+        channel,
+        title,
+        body,
+        status,
+        metadata,
+        scheduled_at,
+        sent_at,
+        created_at
+      FROM notifications
+      WHERE id = $1
+      LIMIT 1;
+    `;
+    const result = await this.pool.query(query, [notificationId]);
+    return result.rows[0] ?? null;
+  }
+
+  async markNotificationDelivery({
+    notificationId,
+    status,
+    metadata,
+  }) {
+    const query = `
+      UPDATE notifications
+      SET
+        status = $2,
+        metadata = notifications.metadata || $3::jsonb,
+        sent_at = CASE
+          WHEN $2 = 'sent' THEN NOW()
+          ELSE sent_at
+        END
+      WHERE id = $1
+      RETURNING
+        id,
+        recipient_user_id,
+        channel,
+        title,
+        body,
+        status,
+        metadata,
+        scheduled_at,
+        sent_at,
+        created_at;
+    `;
+    const result = await this.pool.query(query, [
+      notificationId,
+      status,
+      JSON.stringify(metadata ?? {}),
+    ]);
+    return result.rows[0] ?? null;
+  }
+
   async getPreferencesByUserId(userId) {
     const query = `
       SELECT

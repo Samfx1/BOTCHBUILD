@@ -33,8 +33,10 @@ function createPaymentsController({ paymentsService }) {
       provider: req.params.provider,
       rawPayload: req.body,
       headers: req.headers,
+      requestId: req.context?.requestId ?? null,
     });
-    return res.status(200).json({
+    const statusCode = result.accepted && !result.processedInline ? 202 : 200;
+    return res.status(statusCode).json({
       ok: true,
       result,
     });

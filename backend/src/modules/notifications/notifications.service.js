@@ -1,4 +1,5 @@
 const { createNotificationDispatcher } = require("./notification.dispatcher");
+const { JOB_TYPES } = require("../jobs/jobs.service");
 
 const DEFAULT_PREFERENCES = {
   emailEnabled: true,
@@ -59,6 +60,8 @@ function createNotificationsService({
   notificationsRepository,
   env,
   notificationDispatcher = createNotificationDispatcher({ env }),
+  enqueueJob,
+  auditService,
 }) {
   async function ensurePreferences(userId) {
     const existing = await notificationsRepository.getPreferencesByUserId(userId);
@@ -106,39 +109,124 @@ function createNotificationsService({
       return null;
     }
 
-    const recipient = toRecipientContact(
-      await notificationsRepository.findRecipientContact(recipientUserId),
-    );
-
-    let deliveryResult;
-    try {
-      deliveryResult = await notificationDispatcher.send({
-        channel,
-        recipient,
-        title,
-        body,
-        metadata,
-      });
-    } catch (error) {
-      deliveryResult = {
-        status: "failed",
-        provider: channel,
-        error: error.message ?? "Notification dispatch failed.",
-      };
-    }
-
     const created = await notificationsRepository.createNotification({
       recipientUserId,
       channel,
       title,
       body,
+      status: "queued",
+      metadata,
+    });
+
+    if (!enqueueJob) {
+      return dispatchNotification({
+        notificationId: created.id,
+      });
+    }
+
+    const enqueued = await enqueueJob({
+      type: JOB_TYPES.NOTIFICATION_DISPATCH,
+      payload: {
+        notificationId: created.id,
+      },
+      dedupeKey: `notification:${created.id}`,
+      maxAttempts: 6,
+    });
+
+    if (auditService) {
+      await auditService.logEvent({
+        entityType: "notification",
+        entityId: created.id,
+        action: "notification.queued",
+        level: "info",
+        metadata: {
+          channel,
+          recipientUserId,
+          enqueued: enqueued.enqueued,
+          jobId: enqueued.job.id,
+        },
+      });
+    }
+
+    return toNotification(created);
+  }
+
+  async function dispatchNotification({
+    notificationId,
+    requestId,
+  }) {
+    const notification = await notificationsRepository.findNotificationById(
+      notificationId,
+    );
+    if (!notification) {
+      throw new Error("Notification not found for dispatch.");
+    }
+
+    if (notification.status === "sent") {
+      return toNotification(notification);
+    }
+
+    const recipient = toRecipientContact(
+      await notificationsRepository.findRecipientContact(
+        notification.recipient_user_id,
+      ),
+    );
+
+    let deliveryResult;
+    try {
+      deliveryResult = await notificationDispatcher.send({
+        channel: notification.channel,
+        recipient,
+        title: notification.title,
+        body: notification.body,
+        metadata: notification.metadata ?? {},
+      });
+    } catch (error) {
+      deliveryResult = {
+        status: "failed",
+        provider: notification.channel,
+        error: error.message ?? "Notification dispatch failed.",
+      };
+    }
+
+    const updated = await notificationsRepository.markNotificationDelivery({
+      notificationId: notification.id,
       status: deliveryResult.status === "sent" ? "sent" : "failed",
       metadata: {
-        ...metadata,
         delivery: deliveryResult,
       },
     });
-    return toNotification(created);
+
+    if (auditService) {
+      await auditService.logEvent({
+        entityType: "notification",
+        entityId: notification.id,
+        action:
+          deliveryResult.status === "sent"
+            ? "notification.delivered"
+            : "notification.delivery_failed",
+        level: deliveryResult.status === "sent" ? "info" : "warn",
+        requestId,
+        metadata: {
+          channel: notification.channel,
+          recipientUserId: notification.recipient_user_id,
+          provider: deliveryResult.provider,
+          error: deliveryResult.error,
+        },
+      });
+    }
+
+    if (deliveryResult.status !== "sent") {
+      throw new Error(deliveryResult.error ?? "Notification delivery failed.");
+    }
+
+    return toNotification(updated);
+  }
+
+  async function processDispatchJob(job) {
+    return dispatchNotification({
+      notificationId: job.payload?.notificationId,
+    });
   }
 
   return {
@@ -146,6 +234,8 @@ function createNotificationsService({
     getPreferences,
     updatePreferences,
     createSystemNotification,
+    dispatchNotification,
+    processDispatchJob,
   };
 }
 

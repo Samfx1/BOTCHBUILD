@@ -1,5 +1,6 @@
-const { randomUUID } = require("node:crypto");
+const { createHash, randomUUID } = require("node:crypto");
 const { HttpError } = require("../../utils/httpError");
+const { JOB_TYPES } = require("../jobs/jobs.service");
 const { createPaymentsGateway } = require("./gateways");
 
 function createProviderReference(provider) {
@@ -44,6 +45,8 @@ function createPaymentsService({
   investmentsRepository,
   notificationsService,
   paymentsGateway = createPaymentsGateway({ env }),
+  enqueueJob,
+  auditService,
 }) {
   async function initializePayment({ actor, input }) {
     const investment = await investmentsRepository.findInvestmentById(input.investmentId);
@@ -107,6 +110,21 @@ function createPaymentsService({
       });
     }
 
+    if (auditService) {
+      await auditService.logEvent({
+        actorUserId: actor.id,
+        entityType: "payment_transaction",
+        entityId: transaction.id,
+        action: "payment.initialize",
+        level: "info",
+        metadata: {
+          provider: input.provider,
+          investmentId: investment.id,
+          providerReference,
+        },
+      });
+    }
+
     return toPaymentTransaction({
       ...transaction,
       investor_user_id: investment.investor_user_id,
@@ -138,9 +156,133 @@ function createPaymentsService({
     return Buffer.from(JSON.stringify(rawPayload ?? {}), "utf-8");
   }
 
-  async function handleWebhook({ provider, rawPayload, headers = {} }) {
+  function createWebhookEventKey(provider, parsedWebhook, payloadHash) {
+    if (parsedWebhook.eventKey) {
+      return parsedWebhook.eventKey;
+    }
+    return `${provider}:${parsedWebhook.providerReference}:${parsedWebhook.status}:${payloadHash.slice(0, 20)}`;
+  }
+
+  async function applyWebhookEvent({
+    webhookEventId,
+    provider,
+    parsedWebhook,
+    requestId,
+  }) {
+    const webhookEvent =
+      (webhookEventId && (await paymentsRepository.findWebhookEventById(webhookEventId))) ||
+      null;
+    const effectiveProvider = provider ?? webhookEvent?.provider;
+    const effectivePayload = parsedWebhook ?? webhookEvent?.payload;
+
+    if (!effectiveProvider || !effectivePayload) {
+      throw new HttpError(
+        400,
+        "Webhook processing payload is missing provider or parsed webhook data.",
+      );
+    }
+
+    const transaction = await paymentsRepository.findByProviderReference(
+      effectivePayload.providerReference,
+    );
+    if (!transaction) {
+      if (webhookEvent?.id) {
+        await paymentsRepository.markWebhookEventFailed({
+          eventId: webhookEvent.id,
+          errorMessage: "Payment transaction not found for provider reference.",
+        });
+      }
+      throw new HttpError(404, "Payment transaction not found.");
+    }
+
+    if (transaction.provider !== effectiveProvider) {
+      if (webhookEvent?.id) {
+        await paymentsRepository.markWebhookEventFailed({
+          eventId: webhookEvent.id,
+          errorMessage: "Provider mismatch for provider reference.",
+        });
+      }
+      throw new HttpError(400, "Provider mismatch for provider reference.");
+    }
+
+    let finalTransaction;
+    if (transaction.status === effectivePayload.status) {
+      finalTransaction = await paymentsRepository.appendTransactionMetadata({
+        transactionId: transaction.id,
+        metadata: {
+          ...effectivePayload.metadata,
+          webhookProvider: effectiveProvider,
+          webhookProcessedAt: new Date().toISOString(),
+          webhookDuplicateStatus: true,
+        },
+      });
+    } else {
+      finalTransaction = await paymentsRepository.updateTransactionStatus({
+        transactionId: transaction.id,
+        status: effectivePayload.status,
+        metadata: {
+          ...effectivePayload.metadata,
+          webhookProvider: effectiveProvider,
+        },
+        paidAt:
+          effectivePayload.status === "succeeded"
+            ? effectivePayload.paidAt ?? new Date().toISOString()
+            : null,
+      });
+
+      const nextInvestmentStatus = investmentStatusFromPaymentStatus(
+        effectivePayload.status,
+      );
+      await investmentsRepository.updateInvestmentStatus({
+        investmentId: transaction.investment_id,
+        status: nextInvestmentStatus,
+      });
+    }
+
+    if (webhookEvent?.id) {
+      await paymentsRepository.markWebhookEventProcessed(webhookEvent.id);
+    }
+
+    if (notificationsService) {
+      await notificationsService.createSystemNotification({
+        recipientUserId: transaction.investor_user_id,
+        channel: "email",
+        title: "Payment status updated",
+        body: `Your payment is now "${effectivePayload.status}".`,
+        metadata: {
+          transactionId: transaction.id,
+          providerReference: transaction.provider_reference,
+          status: effectivePayload.status,
+        },
+      });
+    }
+
+    if (auditService) {
+      await auditService.logEvent({
+        entityType: "payment_webhook_event",
+        entityId: webhookEvent?.id ?? null,
+        action: "payment.webhook.applied",
+        level: "info",
+        requestId,
+        metadata: {
+          provider: effectiveProvider,
+          providerReference: effectivePayload.providerReference,
+          status: effectivePayload.status,
+          transactionId: transaction.id,
+        },
+      });
+    }
+
+    return toPaymentTransaction({
+      ...finalTransaction,
+      investor_user_id: transaction.investor_user_id,
+    });
+  }
+
+  async function handleWebhook({ provider, rawPayload, headers = {}, requestId }) {
+    const normalizedRaw = normalizeRawPayload(rawPayload);
     const parsedWebhook = paymentsGateway.parseWebhook(provider, {
-      rawBody: normalizeRawPayload(rawPayload),
+      rawBody: normalizedRaw,
       headers,
     });
 
@@ -151,62 +293,175 @@ function createPaymentsService({
       };
     }
 
-    const transaction = await paymentsRepository.findByProviderReference(
-      parsedWebhook.providerReference,
-    );
-    if (!transaction) {
-      throw new HttpError(404, "Payment transaction not found.");
+    const payloadHash = createHash("sha256").update(normalizedRaw).digest("hex");
+    const eventKey = createWebhookEventKey(provider, parsedWebhook, payloadHash);
+    const webhookEvent = await paymentsRepository.createOrGetWebhookEvent({
+      provider,
+      eventKey,
+      eventType: parsedWebhook.eventType ?? null,
+      providerReference: parsedWebhook.providerReference,
+      payloadHash,
+      payload: parsedWebhook,
+    });
+
+    if (!webhookEvent.event) {
+      throw new HttpError(500, "Could not persist webhook event.");
     }
 
-    if (transaction.provider !== provider) {
-      throw new HttpError(400, "Provider mismatch for provider reference.");
+    if (!webhookEvent.isNew && webhookEvent.event.status === "processed") {
+      return {
+        ignored: true,
+        duplicate: true,
+        webhookEventId: webhookEvent.event.id,
+        reason: "Webhook event already processed.",
+      };
     }
 
-    const updatedTransaction = await paymentsRepository.updateTransactionStatus({
-      transactionId: transaction.id,
-      status: parsedWebhook.status,
-      metadata: {
-        ...parsedWebhook.metadata,
-        webhookProvider: provider,
+    if (!enqueueJob) {
+      const transaction = await applyWebhookEvent({
+        webhookEventId: webhookEvent.event.id,
+        provider,
+        parsedWebhook,
+        requestId,
+      });
+      return {
+        accepted: true,
+        processedInline: true,
+        transaction,
+      };
+    }
+
+    const enqueued = await enqueueJob({
+      type: JOB_TYPES.PAYMENT_WEBHOOK_APPLY,
+      payload: {
+        webhookEventId: webhookEvent.event.id,
+        provider,
+        parsedWebhook,
       },
-      paidAt:
-        parsedWebhook.status === "succeeded"
-          ? parsedWebhook.paidAt ?? new Date().toISOString()
-          : null,
+      dedupeKey: `webhook:${provider}:${eventKey}`,
+      maxAttempts: 8,
     });
 
-    const nextInvestmentStatus = investmentStatusFromPaymentStatus(
-      parsedWebhook.status,
-    );
-    await investmentsRepository.updateInvestmentStatus({
-      investmentId: transaction.investment_id,
-      status: nextInvestmentStatus,
-    });
-
-    if (notificationsService) {
-      await notificationsService.createSystemNotification({
-        recipientUserId: transaction.investor_user_id,
-        channel: "email",
-        title: "Payment status updated",
-        body: `Your payment is now "${parsedWebhook.status}".`,
+    if (auditService) {
+      await auditService.logEvent({
+        entityType: "payment_webhook_event",
+        entityId: webhookEvent.event.id,
+        action: "payment.webhook.accepted",
+        level: "info",
+        requestId,
         metadata: {
-          transactionId: transaction.id,
-          providerReference: transaction.provider_reference,
+          provider,
+          providerReference: parsedWebhook.providerReference,
           status: parsedWebhook.status,
+          enqueued: enqueued.enqueued,
+          jobId: enqueued.job.id,
         },
       });
     }
 
-    return toPaymentTransaction({
-      ...updatedTransaction,
-      investor_user_id: transaction.investor_user_id,
+    return {
+      accepted: true,
+      processedInline: false,
+      webhookEventId: webhookEvent.event.id,
+      job: enqueued.job,
+      enqueued: enqueued.enqueued,
+    };
+  }
+
+  async function reconcilePendingTransactions({
+    olderThanMinutes = 60,
+    limit = 100,
+    requestId,
+  } = {}) {
+    const pending = await paymentsRepository.listPendingTransactionsOlderThan({
+      olderThanMinutes,
+      limit,
     });
+
+    const reconciled = [];
+    for (const transaction of pending) {
+      const updated = await paymentsRepository.appendTransactionMetadata({
+        transactionId: transaction.id,
+        metadata: {
+          reconciliation: {
+            checkedAt: new Date().toISOString(),
+            reason: "pending-time-threshold",
+            olderThanMinutes,
+          },
+        },
+      });
+
+      reconciled.push(updated.id);
+
+      if (notificationsService) {
+        await notificationsService.createSystemNotification({
+          recipientUserId: transaction.investor_user_id,
+          channel: "email",
+          title: "Payment still pending",
+          body: "Your investment payment is still pending. Please confirm payment status in your bank/provider app.",
+          metadata: {
+            transactionId: transaction.id,
+            providerReference: transaction.provider_reference,
+            source: "reconciliation",
+          },
+        });
+      }
+    }
+
+    if (auditService) {
+      await auditService.logEvent({
+        entityType: "payment_reconciliation",
+        action: "payment.reconcile.pending",
+        level: "info",
+        requestId,
+        metadata: {
+          reconciledCount: reconciled.length,
+          olderThanMinutes,
+          limit,
+        },
+      });
+    }
+
+    return {
+      reconciledCount: reconciled.length,
+      reconciledTransactionIds: reconciled,
+    };
+  }
+
+  async function processWebhookJob(job) {
+    return applyWebhookEvent({
+      webhookEventId: job.payload?.webhookEventId,
+      provider: job.payload?.provider,
+      parsedWebhook: job.payload?.parsedWebhook,
+    });
+  }
+
+  async function processReconciliationJob(job) {
+    return reconcilePendingTransactions({
+      olderThanMinutes: job.payload?.olderThanMinutes ?? 60,
+      limit: job.payload?.limit ?? 100,
+    });
+  }
+
+  async function findTransactionByProviderReference(
+    providerReference,
+  ) {
+    const transaction = await paymentsRepository.findByProviderReference(
+      providerReference,
+    );
+    return transaction
+      ? toPaymentTransaction(transaction)
+      : null;
   }
 
   return {
     initializePayment,
     getTransactionByIdForActor,
     handleWebhook,
+    processWebhookJob,
+    reconcilePendingTransactions,
+    processReconciliationJob,
+    findTransactionByProviderReference,
   };
 }
 

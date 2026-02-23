@@ -7,7 +7,9 @@ const morgan = require("morgan");
 
 const env = require("./config/env");
 const { pool } = require("./db");
+const { attachRequestContext } = require("./middleware/requestContext");
 const { errorHandler } = require("./middleware/errorHandler");
+const { PostgresAuditRepository } = require("./modules/audit/audit.repository");
 const { PostgresAuthRepository } = require("./modules/auth/auth.repository");
 const { createAuthRouter } = require("./modules/auth/auth.routes");
 const { createAuthService } = require("./modules/auth/auth.service");
@@ -15,11 +17,14 @@ const { createHealthRouter } = require("./modules/health/health.routes");
 const { PostgresInvestmentsRepository } = require("./modules/investments/investments.repository");
 const { createInvestmentsRouter } = require("./modules/investments/investments.routes");
 const { createInvestmentsService } = require("./modules/investments/investments.service");
+const { PostgresJobsRepository } = require("./modules/jobs/jobs.repository");
+const { createJobsService, JOB_TYPES } = require("./modules/jobs/jobs.service");
 const { createMediaRouter } = require("./modules/media/media.routes");
 const { createMediaService } = require("./modules/media/media.service");
 const { PostgresNotificationsRepository } = require("./modules/notifications/notifications.repository");
 const { createNotificationsRouter } = require("./modules/notifications/notifications.routes");
 const { createNotificationsService } = require("./modules/notifications/notifications.service");
+const { createOpsRouter } = require("./modules/ops/ops.routes");
 const { PostgresPaymentsRepository } = require("./modules/payments/payments.repository");
 const { createPaymentsRouter } = require("./modules/payments/payments.routes");
 const { createPaymentsService } = require("./modules/payments/payments.service");
@@ -27,6 +32,7 @@ const { PostgresProjectsRepository } = require("./modules/projects/projects.repo
 const { createProjectsRouter } = require("./modules/projects/projects.routes");
 const { createProjectsService } = require("./modules/projects/projects.service");
 const { createUserRouter } = require("./modules/user/user.routes");
+const { createAuditService } = require("./modules/audit/audit.service");
 
 function createApp(options = {}) {
   const authRepository =
@@ -39,12 +45,24 @@ function createApp(options = {}) {
     options.paymentsRepository ?? new PostgresPaymentsRepository({ pool });
   const notificationsRepository =
     options.notificationsRepository ?? new PostgresNotificationsRepository({ pool });
+  const jobsRepository = options.jobsRepository ?? new PostgresJobsRepository({ pool });
+  const auditRepository =
+    options.auditRepository ?? new PostgresAuditRepository({ pool });
 
   const authService = createAuthService({ authRepository });
+  const auditService = createAuditService({
+    auditRepository,
+  });
+  const jobsService = createJobsService({
+    jobsRepository,
+    auditService,
+  });
   const notificationsService = createNotificationsService({
     notificationsRepository,
     env,
     notificationDispatcher: options.notificationDispatcher,
+    enqueueJob: (input) => jobsService.enqueue(input),
+    auditService,
   });
   const projectsService = createProjectsService({
     projectsRepository,
@@ -66,7 +84,19 @@ function createApp(options = {}) {
     investmentsRepository,
     notificationsService,
     paymentsGateway: options.paymentsGateway,
+    enqueueJob: (input) => jobsService.enqueue(input),
+    auditService,
   });
+
+  jobsService.registerHandler(JOB_TYPES.NOTIFICATION_DISPATCH, (job) =>
+    notificationsService.processDispatchJob(job),
+  );
+  jobsService.registerHandler(JOB_TYPES.PAYMENT_WEBHOOK_APPLY, (job) =>
+    paymentsService.processWebhookJob(job),
+  );
+  jobsService.registerHandler(JOB_TYPES.PAYMENT_RECONCILE_PENDING, (job) =>
+    paymentsService.processReconciliationJob(job),
+  );
 
   const app = express();
 
@@ -85,6 +115,7 @@ function createApp(options = {}) {
       credentials: true,
     }),
   );
+  app.use(attachRequestContext);
   app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
   app.use(
     "/api/v1/payments/webhook",
@@ -100,7 +131,7 @@ function createApp(options = {}) {
     res.json({
       service: "botchbuild-api",
       status: "ok",
-      phase: "phase-2-integrations",
+      phase: "phase-3-operations-hardening",
     });
   });
 
@@ -117,6 +148,13 @@ function createApp(options = {}) {
   app.use(
     "/api/v1/notifications",
     createNotificationsRouter({ notificationsService }),
+  );
+  app.use(
+    "/api/v1/ops",
+    createOpsRouter({
+      jobsService,
+      auditService,
+    }),
   );
 
   app.use((_req, res) => {

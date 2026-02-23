@@ -139,3 +139,32 @@ export type MediaUploadTarget = {
   mediaType: "photo" | "video";
   contentType: string;
 };
+
+export type OperationJob = {
+  id: string;
+  type: string;
+  status: "queued" | "running" | "completed" | "failed" | "dead";
+  payload: Record<string, unknown>;
+  dedupeKey: string | null;
+  attempts: number;
+  maxAttempts: number;
+  runAt: string;
+  lockedAt: string | null;
+  lockedBy: string | null;
+  completedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AuditEvent = {
+  id: string;
+  actorUserId: string | null;
+  entityType: string;
+  entityId: string | null;
+  action: string;
+  level: "info" | "warn" | "error";
+  requestId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+};

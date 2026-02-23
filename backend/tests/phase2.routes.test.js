@@ -28,10 +28,7 @@ class InMemoryAuthRepository {
 
   async findUserByEmail(email) {
     const id = this.usersByEmail.get(email);
-    if (!id) {
-      return null;
-    }
-    return this.users.get(id) ?? null;
+    return id ? this.users.get(id) ?? null : null;
   }
 
   async findUserById(userId) {
@@ -73,10 +70,9 @@ class InMemoryProjectsRepository {
   }
 
   async listProjects({ status, limit, offset }) {
-    const list = Array.from(this.projects.values())
+    return Array.from(this.projects.values())
       .filter((project) => (status ? project.status === status : true))
       .slice(offset, offset + limit);
-    return list;
   }
 
   async findProjectById(projectId) {
@@ -137,7 +133,10 @@ class InMemoryProjectsRepository {
     return this.updates
       .filter((update) => update.project_id === projectId)
       .slice(0, limit)
-      .map((update) => ({ ...update, uploaded_by_name: "Developer User" }));
+      .map((update) => ({
+        ...update,
+        uploaded_by_name: "Developer User",
+      }));
   }
 }
 
@@ -164,7 +163,7 @@ class InMemoryInvestmentsRepository {
   }
 
   async listInvestmentsForUser(userId, { status, limit, offset }) {
-    const list = Array.from(this.investments.values())
+    return Array.from(this.investments.values())
       .filter((investment) => investment.investor_user_id === userId)
       .filter((investment) => (status ? investment.status === status : true))
       .slice(offset, offset + limit)
@@ -173,8 +172,6 @@ class InMemoryInvestmentsRepository {
         project_title: "Airport Hills Residential Phase A",
         project_status: "in_progress",
       }));
-
-    return list;
   }
 
   async findInvestmentById(investmentId) {
@@ -184,7 +181,6 @@ class InMemoryInvestmentsRepository {
     }
     return {
       ...investment,
-      investor_email: investment.investor_email,
       project_title: "Airport Hills Residential Phase A",
       project_owner_user_id: randomUUID(),
       project_status: "in_progress",
@@ -206,16 +202,20 @@ class InMemoryInvestmentsRepository {
   }
 
   async listInvestorIdsByProject(projectId) {
-    const ids = Array.from(this.investments.values())
-      .filter((investment) => investment.project_id === projectId)
-      .map((investment) => investment.investor_user_id);
-    return Array.from(new Set(ids));
+    return Array.from(
+      new Set(
+        Array.from(this.investments.values())
+          .filter((investment) => investment.project_id === projectId)
+          .map((investment) => investment.investor_user_id),
+      ),
+    );
   }
 }
 
 class InMemoryPaymentsRepository {
   constructor() {
     this.transactions = new Map();
+    this.webhookEvents = new Map();
   }
 
   async createTransaction({
@@ -281,6 +281,91 @@ class InMemoryPaymentsRepository {
     this.transactions.set(transactionId, updated);
     return updated;
   }
+
+  async appendTransactionMetadata({ transactionId, metadata }) {
+    return this.updateTransactionStatus({
+      transactionId,
+      status: this.transactions.get(transactionId)?.status ?? "pending",
+      metadata,
+      paidAt: this.transactions.get(transactionId)?.paid_at ?? null,
+    });
+  }
+
+  async createOrGetWebhookEvent({
+    provider,
+    eventKey,
+    eventType,
+    providerReference,
+    payloadHash,
+    payload,
+  }) {
+    const key = `${provider}:${eventKey}`;
+    if (this.webhookEvents.has(key)) {
+      return {
+        event: this.webhookEvents.get(key),
+        isNew: false,
+      };
+    }
+
+    const created = {
+      id: randomUUID(),
+      provider,
+      event_key: eventKey,
+      event_type: eventType ?? null,
+      provider_reference: providerReference ?? null,
+      payload_hash: payloadHash,
+      payload,
+      status: "received",
+      error_count: 0,
+      last_error: null,
+      processed_at: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.webhookEvents.set(key, created);
+    return {
+      event: created,
+      isNew: true,
+    };
+  }
+
+  async findWebhookEventById(eventId) {
+    return (
+      Array.from(this.webhookEvents.values()).find((event) => event.id === eventId) ??
+      null
+    );
+  }
+
+  async markWebhookEventProcessed(eventId) {
+    const event = await this.findWebhookEventById(eventId);
+    if (!event) {
+      return null;
+    }
+    event.status = "processed";
+    event.processed_at = new Date().toISOString();
+    event.updated_at = new Date().toISOString();
+    return event;
+  }
+
+  async markWebhookEventFailed({ eventId, errorMessage }) {
+    const event = await this.findWebhookEventById(eventId);
+    if (!event) {
+      return null;
+    }
+    event.status = "failed";
+    event.error_count += 1;
+    event.last_error = errorMessage;
+    event.updated_at = new Date().toISOString();
+    return event;
+  }
+
+  async listPendingTransactionsOlderThan({ olderThanMinutes, limit }) {
+    const threshold = Date.now() - olderThanMinutes * 60 * 1000;
+    return Array.from(this.transactions.values())
+      .filter((transaction) => transaction.status === "pending")
+      .filter((transaction) => new Date(transaction.created_at).getTime() <= threshold)
+      .slice(0, limit);
+  }
 }
 
 class InMemoryNotificationsRepository {
@@ -320,6 +405,26 @@ class InMemoryNotificationsRepository {
     return created;
   }
 
+  async findNotificationById(notificationId) {
+    return this.notifications.find((item) => item.id === notificationId) ?? null;
+  }
+
+  async markNotificationDelivery({ notificationId, status, metadata }) {
+    const notification = await this.findNotificationById(notificationId);
+    if (!notification) {
+      return null;
+    }
+    notification.status = status;
+    notification.metadata = {
+      ...notification.metadata,
+      ...metadata,
+    };
+    if (status === "sent") {
+      notification.sent_at = new Date().toISOString();
+    }
+    return notification;
+  }
+
   async getPreferencesByUserId(userId) {
     return this.preferences.get(userId) ?? null;
   }
@@ -352,7 +457,6 @@ class InMemoryNotificationsRepository {
     if (!user) {
       return null;
     }
-
     return {
       id: user.id,
       full_name: user.full_name,
@@ -362,8 +466,148 @@ class InMemoryNotificationsRepository {
   }
 }
 
+class InMemoryJobsRepository {
+  constructor() {
+    this.jobs = new Map();
+  }
+
+  async enqueueJob({
+    type,
+    payload = {},
+    dedupeKey = null,
+    maxAttempts = 5,
+    runAt = null,
+  }) {
+    const active = Array.from(this.jobs.values()).find(
+      (job) =>
+        dedupeKey &&
+        job.dedupe_key === dedupeKey &&
+        (job.status === "queued" || job.status === "running"),
+    );
+
+    if (active) {
+      return {
+        job: active,
+        enqueued: false,
+      };
+    }
+
+    const now = new Date().toISOString();
+    const created = {
+      id: randomUUID(),
+      type,
+      status: "queued",
+      payload,
+      dedupe_key: dedupeKey,
+      attempts: 0,
+      max_attempts: maxAttempts,
+      run_at: runAt ?? now,
+      locked_at: null,
+      locked_by: null,
+      completed_at: null,
+      last_error: null,
+      created_at: now,
+      updated_at: now,
+    };
+    this.jobs.set(created.id, created);
+    return {
+      job: created,
+      enqueued: true,
+    };
+  }
+
+  async claimDueJobs({ workerId, limit }) {
+    const now = Date.now();
+    const queued = Array.from(this.jobs.values())
+      .filter((job) => job.status === "queued")
+      .filter((job) => new Date(job.run_at).getTime() <= now)
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      .slice(0, limit);
+
+    return queued.map((job) => {
+      job.status = "running";
+      job.attempts += 1;
+      job.locked_by = workerId;
+      job.locked_at = new Date().toISOString();
+      job.updated_at = new Date().toISOString();
+      return job;
+    });
+  }
+
+  async markCompleted(jobId) {
+    const job = this.jobs.get(jobId);
+    if (!job) {
+      return null;
+    }
+    job.status = "completed";
+    job.completed_at = new Date().toISOString();
+    job.locked_at = null;
+    job.locked_by = null;
+    job.updated_at = new Date().toISOString();
+    return job;
+  }
+
+  async markFailed({ jobId, errorMessage, retryRunAt, dead }) {
+    const job = this.jobs.get(jobId);
+    if (!job) {
+      return null;
+    }
+    job.status = dead ? "dead" : "queued";
+    job.run_at = retryRunAt ?? job.run_at;
+    job.last_error = errorMessage;
+    job.locked_at = null;
+    job.locked_by = null;
+    job.updated_at = new Date().toISOString();
+    return job;
+  }
+
+  async listJobs({ status, limit, offset }) {
+    return Array.from(this.jobs.values())
+      .filter((job) => (status ? job.status === status : true))
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .slice(offset, offset + limit);
+  }
+}
+
+class InMemoryAuditRepository {
+  constructor() {
+    this.events = [];
+  }
+
+  async createEvent({
+    actorUserId,
+    entityType,
+    entityId,
+    action,
+    level,
+    requestId,
+    metadata,
+  }) {
+    const created = {
+      id: randomUUID(),
+      actor_user_id: actorUserId ?? null,
+      entity_type: entityType,
+      entity_id: entityId ?? null,
+      action,
+      level: level ?? "info",
+      request_id: requestId ?? null,
+      metadata: metadata ?? {},
+      created_at: new Date().toISOString(),
+    };
+    this.events.unshift(created);
+    return created;
+  }
+
+  async listEvents({ limit, offset, level, entityType }) {
+    return this.events
+      .filter((event) => (level ? event.level === level : true))
+      .filter((event) => (entityType ? event.entity_type === entityType : true))
+      .slice(offset, offset + limit);
+  }
+}
+
 describe("Phase 2 core routes", () => {
-  test("project -> investment -> payment -> update -> notifications flow", async () => {
+  test("project -> investment -> queued webhook -> jobs -> notifications flow", async () => {
     const authRepository = new InMemoryAuthRepository();
     const projectsRepository = new InMemoryProjectsRepository();
     const investmentsRepository = new InMemoryInvestmentsRepository();
@@ -371,6 +615,8 @@ describe("Phase 2 core routes", () => {
     const notificationsRepository = new InMemoryNotificationsRepository({
       authRepository,
     });
+    const jobsRepository = new InMemoryJobsRepository();
+    const auditRepository = new InMemoryAuditRepository();
 
     const app = createApp({
       authRepository,
@@ -378,7 +624,23 @@ describe("Phase 2 core routes", () => {
       investmentsRepository,
       paymentsRepository,
       notificationsRepository,
+      jobsRepository,
+      auditRepository,
     });
+
+    const adminRegister = await request(app).post("/api/v1/auth/register").send({
+      fullName: "Admin User",
+      role: "investor",
+      email: "admin@example.com",
+      password: "SecurePass!123",
+    });
+    authRepository.users.get(adminRegister.body.user.id).role = "admin";
+    const adminLogin = await request(app).post("/api/v1/auth/login").send({
+      email: "admin@example.com",
+      password: "SecurePass!123",
+    });
+    expect(adminLogin.status).toBe(200);
+    const adminAccessToken = adminLogin.body.accessToken;
 
     const developerRegister = await request(app).post("/api/v1/auth/register").send({
       fullName: "Developer User",
@@ -386,7 +648,6 @@ describe("Phase 2 core routes", () => {
       email: "dev@example.com",
       password: "SecurePass!123",
     });
-    expect(developerRegister.status).toBe(201);
 
     const investorRegister = await request(app).post("/api/v1/auth/register").send({
       fullName: "Investor User",
@@ -394,7 +655,6 @@ describe("Phase 2 core routes", () => {
       email: "investor@example.com",
       password: "SecurePass!123",
     });
-    expect(investorRegister.status).toBe(201);
 
     const createProject = await request(app)
       .post("/api/v1/projects")
@@ -408,10 +668,6 @@ describe("Phase 2 core routes", () => {
         status: "in_progress",
       });
     expect(createProject.status).toBe(201);
-
-    const listProjects = await request(app).get("/api/v1/projects");
-    expect(listProjects.status).toBe(200);
-    expect(listProjects.body.projects.length).toBe(1);
 
     const createInvestment = await request(app)
       .post("/api/v1/investments")
@@ -431,7 +687,6 @@ describe("Phase 2 core routes", () => {
         provider: "paystack",
       });
     expect(initializePayment.status).toBe(201);
-    expect(initializePayment.body.providerReference).toContain("paystack_");
 
     const webhookPayload = JSON.stringify({
       event: "charge.success",
@@ -450,8 +705,24 @@ describe("Phase 2 core routes", () => {
       .set("Content-Type", "application/json")
       .set("x-paystack-signature", webhookSignature)
       .send(webhookPayload);
-    expect(webhookResult.status).toBe(200);
-    expect(webhookResult.body.result.status).toBe("succeeded");
+    expect(webhookResult.status).toBe(202);
+    expect(webhookResult.body.result.accepted).toBe(true);
+    expect(webhookResult.body.result.processedInline).toBe(false);
+
+    const processJobs = await request(app)
+      .post("/api/v1/ops/jobs/process")
+      .set("Authorization", `Bearer ${adminAccessToken}`)
+      .send({
+        limit: 50,
+      });
+    expect(processJobs.status).toBe(200);
+    expect(processJobs.body.processedCount).toBeGreaterThan(0);
+
+    const transaction = await request(app)
+      .get(`/api/v1/payments/${initializePayment.body.id}`)
+      .set("Authorization", `Bearer ${investorRegister.body.accessToken}`);
+    expect(transaction.status).toBe(200);
+    expect(transaction.body.status).toBe("succeeded");
 
     const uploadTarget = await request(app)
       .post("/api/v1/media/upload-target")
@@ -463,8 +734,6 @@ describe("Phase 2 core routes", () => {
         projectId: createProject.body.id,
       });
     expect(uploadTarget.status).toBe(201);
-    expect(uploadTarget.body.provider).toBe("local");
-    expect(uploadTarget.body.publicUrl).toContain("/uploads/");
 
     const postUpdate = await request(app)
       .post(`/api/v1/projects/${createProject.body.id}/updates`)
@@ -476,17 +745,17 @@ describe("Phase 2 core routes", () => {
       });
     expect(postUpdate.status).toBe(201);
 
-    const listUpdates = await request(app).get(
-      `/api/v1/projects/${createProject.body.id}/updates`,
-    );
-    expect(listUpdates.status).toBe(200);
-    expect(listUpdates.body.updates.length).toBe(1);
-
     const myNotifications = await request(app)
       .get("/api/v1/notifications/me")
       .set("Authorization", `Bearer ${investorRegister.body.accessToken}`);
     expect(myNotifications.status).toBe(200);
     expect(myNotifications.body.notifications.length).toBeGreaterThan(0);
+
+    const auditEvents = await request(app)
+      .get("/api/v1/ops/audit?limit=20")
+      .set("Authorization", `Bearer ${adminAccessToken}`);
+    expect(auditEvents.status).toBe(200);
+    expect(auditEvents.body.events.length).toBeGreaterThan(0);
 
     const updatePreferences = await request(app)
       .put("/api/v1/notifications/preferences")

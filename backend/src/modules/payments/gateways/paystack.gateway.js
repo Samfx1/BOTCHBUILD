@@ -114,6 +114,10 @@ function createPaystackGateway({ env }) {
     }
 
     return {
+      eventKey:
+        event?.id ??
+        `${event.event}:${providerReference}:${event?.data?.status ?? "unknown"}`,
+      eventType: event.event,
       providerReference,
       status,
       paidAt: status === "succeeded" ? event?.data?.paid_at ?? new Date().toISOString() : null,

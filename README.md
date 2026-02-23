@@ -1,4 +1,4 @@
-# Botch Build Platform (Phases 1-2)
+# Botch Build Platform (Phases 1-3)
 
 Secure, full-stack platform baseline for a diaspora-focused real estate
 investment application that supports:
@@ -10,6 +10,7 @@ investment application that supports:
 - Signed Stripe/Paystack webhook processing
 - Media upload target pipeline (local/S3/Cloudinary)
 - Notification feeds, preferences, and provider adapters (email/SMS/WhatsApp)
+- Operations hardening (job queue, idempotent webhooks, audit logs, worker)
 - PostgreSQL-backed domain schema
 - Dockerized local development
 
@@ -123,12 +124,30 @@ Webhook signatures:
 - `PUT /api/v1/notifications/preferences`
 - `POST /api/v1/notifications/test`
 
+### Operations (admin)
+
+- `GET /api/v1/ops/jobs`
+- `POST /api/v1/ops/jobs/process`
+- `GET /api/v1/ops/audit`
+- `POST /api/v1/ops/reconciliation/payments`
+
 ## Running test suites
 
 ```bash
 npm run test --prefix backend
 npm run test --prefix frontend
 ```
+
+## Background worker
+
+Run queue processing worker:
+
+```bash
+npm run worker --prefix backend
+```
+
+The worker executes queued jobs for notification dispatch, payment webhook
+processing, and reconciliation.
 
 ## Database migrations
 
@@ -142,9 +161,11 @@ Current baseline migration:
 
 - `backend/migrations/001_phase1_foundation.sql`
 - `backend/migrations/002_phase2_core_modules.sql`
+- `backend/migrations/003_phase3_operations_hardening.sql`
 
 ## Phase documentation
 
 - `docs/PHASE1_FOUNDATION.md`
 - `docs/PHASE2_CORE_MODULES.md`
 - `docs/PHASE2_INTEGRATIONS.md`
+- `docs/PHASE3_OPERATIONS_HARDENING.md`

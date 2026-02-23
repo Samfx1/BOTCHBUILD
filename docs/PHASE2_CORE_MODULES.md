@@ -42,7 +42,12 @@ notification preferences.
 
 - `POST /api/v1/payments/initialize`
 - `GET /api/v1/payments/:transactionId`
-- `POST /api/v1/payments/webhook/:provider` (requires `x-webhook-secret`)
+- `POST /api/v1/payments/webhook/:provider`
+
+Webhook signatures (integration iteration):
+
+- Stripe: `stripe-signature`
+- Paystack: `x-paystack-signature`
 
 ### Notifications
 

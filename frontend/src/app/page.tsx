@@ -11,9 +11,9 @@ export default function Home() {
           Secure diaspora investment portal for Ghana real estate projects
         </h1>
         <p className="max-w-3xl text-slate-600 dark:text-slate-300">
-          Foundation + Phase 2 release includes account security, project
-          discovery, investor payment initialization, progress updates, and
-          notification controls.
+          Foundation + Phases 2-3 include account security, project discovery,
+          investor payment workflows, progress updates, notification controls,
+          and operations hardening.
         </p>
         <div className="flex flex-wrap gap-3">
           <Link
@@ -39,6 +39,12 @@ export default function Home() {
             className="rounded-md border border-slate-300 px-5 py-3 text-sm font-semibold hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
           >
             Projects
+          </Link>
+          <Link
+            href="/ops"
+            className="rounded-md border border-slate-300 px-5 py-3 text-sm font-semibold hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+          >
+            Ops
           </Link>
         </div>
       </main>

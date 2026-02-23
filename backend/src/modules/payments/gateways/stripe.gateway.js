@@ -128,6 +128,8 @@ function createStripeGateway({ env }) {
         : "failed";
 
     return {
+      eventKey: event.id,
+      eventType: event.type,
       providerReference,
       status,
       paidAt: status === "succeeded" ? new Date().toISOString() : null,

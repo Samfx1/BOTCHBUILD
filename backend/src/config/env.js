@@ -48,6 +48,8 @@ const envSchema = z.object({
   TWILIO_AUTH_TOKEN: z.string().default(""),
   TWILIO_SMS_FROM: z.string().default(""),
   TWILIO_WHATSAPP_FROM: z.string().default(""),
+  OPS_WORKER_POLL_MS: z.coerce.number().int().min(500).default(5000),
+  OPS_WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(200).default(30),
 });
 
 const parsed = envSchema.safeParse(process.env);
