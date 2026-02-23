@@ -1,4 +1,5 @@
 const { randomUUID } = require("node:crypto");
+const { createRequestLogger } = require("../utils/logger");
 
 function attachRequestContext(req, res, next) {
   const headerRequestId = req.headers["x-request-id"];
@@ -11,6 +12,7 @@ function attachRequestContext(req, res, next) {
     requestId,
     startedAt: Date.now(),
   };
+  req.log = createRequestLogger(requestId);
 
   res.setHeader("x-request-id", requestId);
   next();

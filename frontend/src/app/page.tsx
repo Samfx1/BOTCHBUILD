@@ -11,9 +11,9 @@ export default function Home() {
           Secure diaspora investment portal for Ghana real estate projects
         </h1>
         <p className="max-w-3xl text-slate-600 dark:text-slate-300">
-          Foundation + Phases 2-3 include account security, project discovery,
+          Foundation + Phases 2-4 include account security, project discovery,
           investor payment workflows, progress updates, notification controls,
-          and operations hardening.
+          operations hardening, and deployment security tooling.
         </p>
         <div className="flex flex-wrap gap-3">
           <Link

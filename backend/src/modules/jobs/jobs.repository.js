@@ -253,6 +253,33 @@ class PostgresJobsRepository {
     const result = await this.pool.query(query, values);
     return result.rows;
   }
+
+  async getQueueStats() {
+    const query = `
+      SELECT
+        status,
+        COUNT(*)::int AS count
+      FROM operation_jobs
+      GROUP BY status;
+    `;
+    const result = await this.pool.query(query);
+
+    const summary = {
+      queued: 0,
+      running: 0,
+      completed: 0,
+      failed: 0,
+      dead: 0,
+    };
+
+    for (const row of result.rows) {
+      if (Object.prototype.hasOwnProperty.call(summary, row.status)) {
+        summary[row.status] = row.count;
+      }
+    }
+
+    return summary;
+  }
 }
 
 module.exports = {

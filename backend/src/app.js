@@ -1,19 +1,20 @@
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const express = require("express");
-const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
-const morgan = require("morgan");
 
 const env = require("./config/env");
 const { pool } = require("./db");
+const { accessLogger } = require("./middleware/accessLogger");
 const { attachRequestContext } = require("./middleware/requestContext");
+const { globalLimiter } = require("./middleware/rateLimiters");
 const { errorHandler } = require("./middleware/errorHandler");
 const { PostgresAuditRepository } = require("./modules/audit/audit.repository");
 const { PostgresAuthRepository } = require("./modules/auth/auth.repository");
 const { createAuthRouter } = require("./modules/auth/auth.routes");
 const { createAuthService } = require("./modules/auth/auth.service");
 const { createHealthRouter } = require("./modules/health/health.routes");
+const { createHealthService } = require("./modules/health/health.service");
 const { PostgresInvestmentsRepository } = require("./modules/investments/investments.repository");
 const { createInvestmentsRouter } = require("./modules/investments/investments.routes");
 const { createInvestmentsService } = require("./modules/investments/investments.service");
@@ -87,6 +88,13 @@ function createApp(options = {}) {
     enqueueJob: (input) => jobsService.enqueue(input),
     auditService,
   });
+  const healthService =
+    options.healthService ??
+    createHealthService({
+      pool,
+      jobsRepository,
+      env,
+    });
 
   jobsService.registerHandler(JOB_TYPES.NOTIFICATION_DISPATCH, (job) =>
     notificationsService.processDispatchJob(job),
@@ -99,24 +107,33 @@ function createApp(options = {}) {
   );
 
   const app = express();
+  app.disable("x-powered-by");
+  app.set("trust proxy", 1);
 
-  app.use(helmet());
   app.use(
-    rateLimit({
-      windowMs: 15 * 60 * 1000,
-      max: 300,
-      standardHeaders: "draft-8",
-      legacyHeaders: false,
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
     }),
   );
   app.use(
     cors({
-      origin: env.FRONTEND_URL,
+      origin: (origin, callback) => {
+        if (!origin || env.CORS_ALLOWED_ORIGINS_LIST.includes(origin)) {
+          callback(null, true);
+          return;
+        }
+        const error = new Error("Origin is not allowed by CORS policy.");
+        error.name = "CorsError";
+        error.statusCode = 403;
+        callback(error);
+      },
       credentials: true,
     }),
   );
   app.use(attachRequestContext);
-  app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
+  app.use(accessLogger);
+  app.use(globalLimiter);
   app.use(
     "/api/v1/payments/webhook",
     express.raw({
@@ -135,7 +152,7 @@ function createApp(options = {}) {
     });
   });
 
-  app.use("/api/v1/health", createHealthRouter());
+  app.use("/api/v1/health", createHealthRouter({ healthService }));
   app.use("/api/v1/auth", createAuthRouter({ authService }));
   app.use("/api/v1/users", createUserRouter({ authRepository }));
   app.use("/api/v1/projects", createProjectsRouter({ projectsService }));

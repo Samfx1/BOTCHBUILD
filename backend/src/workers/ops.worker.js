@@ -10,6 +10,7 @@ const { PostgresNotificationsRepository } = require("../modules/notifications/no
 const { createNotificationsService } = require("../modules/notifications/notifications.service");
 const { PostgresPaymentsRepository } = require("../modules/payments/payments.repository");
 const { createPaymentsService } = require("../modules/payments/payments.service");
+const { log, serializeError } = require("../utils/logger");
 
 async function startWorker() {
   const auditRepository = new PostgresAuditRepository({ pool });
@@ -68,23 +69,27 @@ async function startWorker() {
         limit: env.OPS_WORKER_BATCH_SIZE,
       });
       if (result.processedCount > 0) {
-        // eslint-disable-next-line no-console
-        console.log(
-          `[ops-worker] processed=${result.processedCount} claimed=${result.claimedCount}`,
-        );
+        log("info", "ops_worker.tick.processed", {
+          workerId,
+          processedCount: result.processedCount,
+          claimedCount: result.claimedCount,
+        });
       }
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error("[ops-worker] processing error:", error);
+      log("error", "ops_worker.tick.failed", {
+        workerId,
+        error: serializeError(error),
+      });
     } finally {
       running = false;
     }
   }
 
-  // eslint-disable-next-line no-console
-  console.log(
-    `[ops-worker] started workerId=${workerId} pollMs=${env.OPS_WORKER_POLL_MS} batchSize=${env.OPS_WORKER_BATCH_SIZE}`,
-  );
+  log("info", "ops_worker.started", {
+    workerId,
+    pollMs: env.OPS_WORKER_POLL_MS,
+    batchSize: env.OPS_WORKER_BATCH_SIZE,
+  });
 
   const timer = setInterval(processTick, env.OPS_WORKER_POLL_MS);
   processTick();
@@ -95,8 +100,10 @@ async function startWorker() {
     }
     shuttingDown = true;
     clearInterval(timer);
-    // eslint-disable-next-line no-console
-    console.log(`[ops-worker] received ${signal}, shutting down...`);
+    log("info", "ops_worker.shutdown.requested", {
+      workerId,
+      signal,
+    });
     await pool.end();
     process.exit(0);
   }
@@ -106,8 +113,9 @@ async function startWorker() {
 }
 
 startWorker().catch(async (error) => {
-  // eslint-disable-next-line no-console
-  console.error("[ops-worker] fatal startup error:", error);
+  log("error", "ops_worker.startup.failed", {
+    error: serializeError(error),
+  });
   await pool.end();
   process.exit(1);
 });

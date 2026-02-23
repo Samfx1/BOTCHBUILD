@@ -1,4 +1,4 @@
-# Botch Build Platform (Phases 1-3)
+# Botch Build Platform (Phases 1-4)
 
 Secure, full-stack platform baseline for a diaspora-focused real estate
 investment application that supports:
@@ -11,6 +11,7 @@ investment application that supports:
 - Media upload target pipeline (local/S3/Cloudinary)
 - Notification feeds, preferences, and provider adapters (email/SMS/WhatsApp)
 - Operations hardening (job queue, idempotent webhooks, audit logs, worker)
+- Deployment security hardening (structured logs, readiness probes, CI pipeline)
 - PostgreSQL-backed domain schema
 - Dockerized local development
 
@@ -64,6 +65,12 @@ cp backend/.env.example backend/.env
 npm install --prefix backend
 npm run migrate --prefix backend
 npm run dev --prefix backend
+```
+
+For production baseline configuration:
+
+```bash
+cp backend/.env.production.example backend/.env
 ```
 
 ### Frontend
@@ -131,6 +138,12 @@ Webhook signatures:
 - `GET /api/v1/ops/audit`
 - `POST /api/v1/ops/reconciliation/payments`
 
+### Health probes
+
+- `GET /api/v1/health`
+- `GET /api/v1/health/liveness`
+- `GET /api/v1/health/readiness`
+
 ## Running test suites
 
 ```bash
@@ -148,6 +161,14 @@ npm run worker --prefix backend
 
 The worker executes queued jobs for notification dispatch, payment webhook
 processing, and reconciliation.
+
+## CI pipeline
+
+GitHub Actions workflow:
+
+- `.github/workflows/ci.yml`
+
+Runs backend migrations/tests and frontend tests/lint/build on push/PR.
 
 ## Database migrations
 
@@ -169,3 +190,4 @@ Current baseline migration:
 - `docs/PHASE2_CORE_MODULES.md`
 - `docs/PHASE2_INTEGRATIONS.md`
 - `docs/PHASE3_OPERATIONS_HARDENING.md`
+- `docs/PHASE4_DEPLOYMENT_SECURITY.md`

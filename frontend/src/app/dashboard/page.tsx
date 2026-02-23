@@ -66,8 +66,8 @@ export default function DashboardPage() {
       <div className="rounded-xl bg-white p-8 shadow-sm dark:bg-slate-900">
         <h1 className="mb-2 text-2xl font-bold">Investor dashboard</h1>
         <p className="mb-6 text-sm text-slate-600 dark:text-slate-300">
-          Phases 2-3 include project tracking, investments, payment processing,
-          notifications, and operational reliability controls.
+          Phases 2-4 include project tracking, investments, payment processing,
+          notifications, and deployment-grade reliability controls.
         </p>
 
         {isLoading ? <p>Loading session...</p> : null}

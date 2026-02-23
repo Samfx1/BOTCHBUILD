@@ -1,6 +1,10 @@
 const { Router } = require("express");
 const { z } = require("zod");
 const { authenticateRequest } = require("../../middleware/authenticate");
+const {
+  webhookLimiter,
+  writeActionLimiter,
+} = require("../../middleware/rateLimiters");
 const { asyncHandler } = require("../../utils/asyncHandler");
 const { createPaymentsController } = require("./payments.controller");
 
@@ -23,6 +27,7 @@ function createPaymentsRouter({ paymentsService }) {
 
   router.post(
     "/initialize",
+    writeActionLimiter,
     authenticateRequest,
     asyncHandler(controller.initializePayment),
   );
@@ -33,6 +38,7 @@ function createPaymentsRouter({ paymentsService }) {
   );
   router.post(
     "/webhook/:provider",
+    webhookLimiter,
     validateProviderParam,
     asyncHandler(controller.handleWebhook),
   );

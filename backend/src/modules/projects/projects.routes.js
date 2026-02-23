@@ -1,6 +1,7 @@
 const { Router } = require("express");
 const { authorizeRoles } = require("../../middleware/authorize");
 const { authenticateRequest } = require("../../middleware/authenticate");
+const { writeActionLimiter } = require("../../middleware/rateLimiters");
 const { asyncHandler } = require("../../utils/asyncHandler");
 const { createProjectsController } = require("./projects.controller");
 
@@ -14,12 +15,14 @@ function createProjectsRouter({ projectsService }) {
 
   router.post(
     "/",
+    writeActionLimiter,
     authenticateRequest,
     authorizeRoles(["developer", "admin"]),
     asyncHandler(controller.createProject),
   );
   router.post(
     "/:projectId/updates",
+    writeActionLimiter,
     authenticateRequest,
     asyncHandler(controller.createProjectUpdate),
   );

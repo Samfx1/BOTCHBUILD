@@ -1,5 +1,6 @@
 const { Router } = require("express");
 const { authenticateRequest } = require("../../middleware/authenticate");
+const { writeActionLimiter } = require("../../middleware/rateLimiters");
 const { asyncHandler } = require("../../utils/asyncHandler");
 const { createNotificationsController } = require("./notifications.controller");
 
@@ -15,11 +16,13 @@ function createNotificationsRouter({ notificationsService }) {
   );
   router.put(
     "/preferences",
+    writeActionLimiter,
     authenticateRequest,
     asyncHandler(controller.updatePreferences),
   );
   router.post(
     "/test",
+    writeActionLimiter,
     authenticateRequest,
     asyncHandler(controller.createTestNotification),
   );
