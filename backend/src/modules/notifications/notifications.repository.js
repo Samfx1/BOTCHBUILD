@@ -155,6 +155,59 @@ class PostgresNotificationsRepository {
     return result.rows[0] ?? null;
   }
 
+  async ensurePreferencesForUsers(userIds, defaults) {
+    if (!userIds || userIds.length === 0) {
+      return;
+    }
+
+    const query = `
+      INSERT INTO notification_preferences (
+        user_id,
+        email_enabled,
+        sms_enabled,
+        push_enabled,
+        whatsapp_enabled
+      )
+      SELECT
+        u.user_id,
+        $2,
+        $3,
+        $4,
+        $5
+      FROM unnest($1::uuid[]) AS u(user_id)
+      ON CONFLICT (user_id) DO NOTHING;
+    `;
+    await this.pool.query(query, [
+      userIds,
+      defaults.emailEnabled,
+      defaults.smsEnabled,
+      defaults.pushEnabled,
+      defaults.whatsappEnabled,
+    ]);
+  }
+
+  async getPreferencesByUserIds(userIds) {
+    if (!userIds || userIds.length === 0) {
+      return [];
+    }
+
+    const query = `
+      SELECT
+        id,
+        user_id,
+        email_enabled,
+        sms_enabled,
+        push_enabled,
+        whatsapp_enabled,
+        created_at,
+        updated_at
+      FROM notification_preferences
+      WHERE user_id = ANY($1::uuid[]);
+    `;
+    const result = await this.pool.query(query, [userIds]);
+    return result.rows;
+  }
+
   async upsertPreferences({
     userId,
     emailEnabled,
@@ -210,6 +263,24 @@ class PostgresNotificationsRepository {
     `;
     const result = await this.pool.query(query, [userId]);
     return result.rows[0] ?? null;
+  }
+
+  async findRecipientContactsByUserIds(userIds) {
+    if (!userIds || userIds.length === 0) {
+      return [];
+    }
+
+    const query = `
+      SELECT
+        id,
+        full_name,
+        email,
+        phone_number
+      FROM users
+      WHERE id = ANY($1::uuid[]);
+    `;
+    const result = await this.pool.query(query, [userIds]);
+    return result.rows;
   }
 }
 

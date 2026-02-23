@@ -47,7 +47,16 @@ function createPaymentsService({
   paymentsGateway = createPaymentsGateway({ env }),
   enqueueJob,
   auditService,
+  cacheManager,
 }) {
+  function invalidateProjectCaches(projectId) {
+    cacheManager?.invalidateByPrefix("projects:list:");
+    if (projectId) {
+      cacheManager?.delete(`projects:detail:${projectId}`);
+      cacheManager?.invalidateByPrefix(`projects:updates:${projectId}:`);
+    }
+  }
+
   async function initializePayment({ actor, input }) {
     const investment = await investmentsRepository.findInvestmentById(input.investmentId);
     if (!investment) {
@@ -206,6 +215,14 @@ function createPaymentsService({
     }
 
     let finalTransaction;
+    let projectId = transaction.project_id ?? null;
+    if (!projectId) {
+      const investment = await investmentsRepository.findInvestmentById(
+        transaction.investment_id,
+      );
+      projectId = investment?.project_id ?? null;
+    }
+
     if (transaction.status === effectivePayload.status) {
       finalTransaction = await paymentsRepository.appendTransactionMetadata({
         transactionId: transaction.id,
@@ -237,6 +254,8 @@ function createPaymentsService({
         investmentId: transaction.investment_id,
         status: nextInvestmentStatus,
       });
+
+      invalidateProjectCaches(projectId);
     }
 
     if (webhookEvent?.id) {
@@ -392,6 +411,7 @@ function createPaymentsService({
       });
 
       reconciled.push(updated.id);
+      invalidateProjectCaches(transaction.project_id ?? null);
 
       if (notificationsService) {
         await notificationsService.createSystemNotification({

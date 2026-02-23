@@ -35,19 +35,70 @@ function createProjectsService({
   projectsRepository,
   investmentsRepository,
   notificationsService,
+  cacheManager,
+  env,
 }) {
+  const projectsTtlMs = env?.CACHE_PROJECTS_TTL_MS ?? 20000;
+
+  function stableObjectString(input) {
+    return JSON.stringify(
+      Object.keys(input)
+        .sort()
+        .reduce((acc, key) => {
+          acc[key] = input[key];
+          return acc;
+        }, {}),
+    );
+  }
+
+  function listCacheKey(query) {
+    return `projects:list:${stableObjectString(query ?? {})}`;
+  }
+
+  function detailCacheKey(projectId) {
+    return `projects:detail:${projectId}`;
+  }
+
+  function updatesCacheKey(projectId, limit) {
+    return `projects:updates:${projectId}:${limit}`;
+  }
+
+  function invalidateProjectCaches(projectId) {
+    cacheManager?.invalidateByPrefix("projects:list:");
+    if (projectId) {
+      cacheManager?.delete(detailCacheKey(projectId));
+      cacheManager?.invalidateByPrefix(`projects:updates:${projectId}:`);
+    }
+  }
+
   async function listProjects(query) {
+    const cacheKey = listCacheKey(query);
+    const cached = cacheManager?.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const projects = await projectsRepository.listProjects(query);
-    return projects.map(toProject);
+    const normalized = projects.map(toProject);
+    cacheManager?.set(cacheKey, normalized, projectsTtlMs);
+    return normalized;
   }
 
   async function getProjectById(projectId) {
+    const cacheKey = detailCacheKey(projectId);
+    const cached = cacheManager?.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const project = await projectsRepository.findProjectById(projectId);
     if (!project) {
       throw new HttpError(404, "Project not found.");
     }
 
-    return toProject(project);
+    const normalized = toProject(project);
+    cacheManager?.set(cacheKey, normalized, projectsTtlMs);
+    return normalized;
   }
 
   async function createProject({ actor, input }) {
@@ -59,6 +110,8 @@ function createProjectsService({
       ownerUserId: actor.id,
       ...input,
     });
+
+    invalidateProjectCaches(created.id);
 
     return toProject({
       ...created,
@@ -73,11 +126,16 @@ function createProjectsService({
       throw new HttpError(404, "Project not found.");
     }
 
-    const updates = await projectsRepository.listProjectUpdates(projectId, {
-      limit,
-    });
+    const cacheKey = updatesCacheKey(projectId, limit);
+    const cached = cacheManager?.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
 
-    return updates.map(toProjectUpdate);
+    const updates = await projectsRepository.listProjectUpdates(projectId, { limit });
+    const normalized = updates.map(toProjectUpdate);
+    cacheManager?.set(cacheKey, normalized, projectsTtlMs);
+    return normalized;
   }
 
   async function createProjectUpdate({ actor, projectId, input }) {
@@ -101,23 +159,38 @@ function createProjectsService({
       ...input,
     });
 
+    invalidateProjectCaches(projectId);
+
     // Notify project investors that a new media update exists.
     if (investmentsRepository?.listInvestorIdsByProject && notificationsService) {
       const investorIds = await investmentsRepository.listInvestorIdsByProject(projectId);
-      await Promise.all(
-        investorIds.map((investorId) =>
-          notificationsService.createSystemNotification({
-            recipientUserId: investorId,
-            channel: "email",
-            title: `Project update: ${project.title}`,
-            body: `A new ${input.mediaType} update was posted for "${project.title}".`,
-            metadata: {
-              projectId,
-              updateType: input.mediaType,
-            },
-          }),
-        ),
-      );
+      if (notificationsService.createBulkSystemNotifications) {
+        await notificationsService.createBulkSystemNotifications({
+          recipientUserIds: investorIds,
+          channel: "email",
+          title: `Project update: ${project.title}`,
+          body: `A new ${input.mediaType} update was posted for "${project.title}".`,
+          metadata: {
+            projectId,
+            updateType: input.mediaType,
+          },
+        });
+      } else {
+        await Promise.all(
+          investorIds.map((investorId) =>
+            notificationsService.createSystemNotification({
+              recipientUserId: investorId,
+              channel: "email",
+              title: `Project update: ${project.title}`,
+              body: `A new ${input.mediaType} update was posted for "${project.title}".`,
+              metadata: {
+                projectId,
+                updateType: input.mediaType,
+              },
+            }),
+          ),
+        );
+      }
     }
 
     return toProjectUpdate({

@@ -1,4 +1,4 @@
-# Botch Build Platform (Phases 1-4)
+# Botch Build Platform (Phases 1-5)
 
 Secure, full-stack platform baseline for a diaspora-focused real estate
 investment application that supports:
@@ -12,6 +12,7 @@ investment application that supports:
 - Notification feeds, preferences, and provider adapters (email/SMS/WhatsApp)
 - Operations hardening (job queue, idempotent webhooks, audit logs, worker)
 - Deployment security hardening (structured logs, readiness probes, CI pipeline)
+- Performance/scalability hardening (caching, N+1 reduction, response budgets)
 - PostgreSQL-backed domain schema
 - Dockerized local development
 
@@ -162,6 +163,15 @@ npm run worker --prefix backend
 The worker executes queued jobs for notification dispatch, payment webhook
 processing, and reconciliation.
 
+## Performance controls
+
+- In-memory TTL caching for hot project read endpoints
+- Notification fan-out optimization for bulk recipients
+- Response budget headers:
+  - `x-response-bytes`
+  - `x-response-budget`
+  - `x-response-budget-exceeded`
+
 ## CI pipeline
 
 GitHub Actions workflow:
@@ -183,6 +193,7 @@ Current baseline migration:
 - `backend/migrations/001_phase1_foundation.sql`
 - `backend/migrations/002_phase2_core_modules.sql`
 - `backend/migrations/003_phase3_operations_hardening.sql`
+- `backend/migrations/004_phase5_performance_optimizations.sql`
 
 ## Phase documentation
 
@@ -191,3 +202,4 @@ Current baseline migration:
 - `docs/PHASE2_INTEGRATIONS.md`
 - `docs/PHASE3_OPERATIONS_HARDENING.md`
 - `docs/PHASE4_DEPLOYMENT_SECURITY.md`
+- `docs/PHASE5_PERFORMANCE_SCALING.md`

@@ -63,6 +63,7 @@ class PostgresPaymentsRepository {
       SELECT
         pt.id,
         pt.investment_id,
+        i.project_id,
         pt.provider,
         pt.provider_reference,
         pt.amount,
@@ -89,6 +90,7 @@ class PostgresPaymentsRepository {
       SELECT
         pt.id,
         pt.investment_id,
+        i.project_id,
         pt.provider,
         pt.provider_reference,
         pt.amount,
@@ -340,6 +342,7 @@ class PostgresPaymentsRepository {
       SELECT
         pt.id,
         pt.investment_id,
+        i.project_id,
         pt.provider,
         pt.provider_reference,
         pt.amount,

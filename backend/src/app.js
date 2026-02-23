@@ -8,6 +8,7 @@ const { pool } = require("./db");
 const { accessLogger } = require("./middleware/accessLogger");
 const { attachRequestContext } = require("./middleware/requestContext");
 const { globalLimiter } = require("./middleware/rateLimiters");
+const { responseBudget } = require("./middleware/responseBudget");
 const { errorHandler } = require("./middleware/errorHandler");
 const { PostgresAuditRepository } = require("./modules/audit/audit.repository");
 const { PostgresAuthRepository } = require("./modules/auth/auth.repository");
@@ -34,6 +35,7 @@ const { createProjectsRouter } = require("./modules/projects/projects.routes");
 const { createProjectsService } = require("./modules/projects/projects.service");
 const { createUserRouter } = require("./modules/user/user.routes");
 const { createAuditService } = require("./modules/audit/audit.service");
+const { createCacheManager } = require("./utils/cache");
 
 function createApp(options = {}) {
   const authRepository =
@@ -49,6 +51,13 @@ function createApp(options = {}) {
   const jobsRepository = options.jobsRepository ?? new PostgresJobsRepository({ pool });
   const auditRepository =
     options.auditRepository ?? new PostgresAuditRepository({ pool });
+  const cacheManager =
+    options.cacheManager ??
+    createCacheManager({
+      enabled: env.CACHE_ENABLED,
+      defaultTtlMs: env.CACHE_DEFAULT_TTL_MS,
+      maxEntries: env.CACHE_MAX_ENTRIES,
+    });
 
   const authService = createAuthService({ authRepository });
   const auditService = createAuditService({
@@ -69,6 +78,8 @@ function createApp(options = {}) {
     projectsRepository,
     investmentsRepository,
     notificationsService,
+    cacheManager,
+    env,
   });
   const mediaService = createMediaService({
     env,
@@ -78,6 +89,7 @@ function createApp(options = {}) {
     investmentsRepository,
     projectsRepository,
     notificationsService,
+    cacheManager,
   });
   const paymentsService = createPaymentsService({
     env,
@@ -87,6 +99,7 @@ function createApp(options = {}) {
     paymentsGateway: options.paymentsGateway,
     enqueueJob: (input) => jobsService.enqueue(input),
     auditService,
+    cacheManager,
   });
   const healthService =
     options.healthService ??
@@ -143,12 +156,13 @@ function createApp(options = {}) {
   );
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
+  app.use(responseBudget);
 
   app.get("/", (_req, res) => {
     res.json({
       service: "botchbuild-api",
       status: "ok",
-      phase: "phase-3-operations-hardening",
+      phase: "phase-5-performance-scaling",
     });
   });
 

@@ -16,6 +16,22 @@ function isPlaceholderSecret(value) {
   );
 }
 
+const boolFromEnv = z.string().optional().transform((value) => {
+  if (value === undefined) {
+    return true;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  return true;
+});
+
 const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
@@ -69,6 +85,11 @@ const envSchema = z.object({
   RATE_LIMIT_WRITE_MAX: z.coerce.number().int().min(10).default(200),
   RATE_LIMIT_WEBHOOK_MAX: z.coerce.number().int().min(20).default(600),
   RATE_LIMIT_OPS_MAX: z.coerce.number().int().min(5).default(60),
+  CACHE_ENABLED: boolFromEnv,
+  CACHE_DEFAULT_TTL_MS: z.coerce.number().int().min(1000).default(30000),
+  CACHE_PROJECTS_TTL_MS: z.coerce.number().int().min(1000).default(20000),
+  CACHE_MAX_ENTRIES: z.coerce.number().int().min(100).default(5000),
+  API_RESPONSE_BUDGET_BYTES: z.coerce.number().int().min(1024).default(262144),
   OPS_DEAD_JOB_THRESHOLD: z.coerce.number().int().min(0).default(100),
   OPS_WORKER_POLL_MS: z.coerce.number().int().min(500).default(5000),
   OPS_WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(200).default(30),

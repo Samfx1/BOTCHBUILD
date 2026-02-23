@@ -63,6 +63,12 @@ function createNotificationsService({
   enqueueJob,
   auditService,
 }) {
+  function uniqueUserIds(recipientUserIds) {
+    return Array.from(
+      new Set((recipientUserIds ?? []).filter((value) => Boolean(value))),
+    );
+  }
+
   async function ensurePreferences(userId) {
     const existing = await notificationsRepository.getPreferencesByUserId(userId);
     if (existing) {
@@ -73,6 +79,69 @@ function createNotificationsService({
       userId,
       ...DEFAULT_PREFERENCES,
     });
+  }
+
+  async function ensurePreferencesForUsers(userIds) {
+    if (userIds.length === 0) {
+      return;
+    }
+
+    if (notificationsRepository.ensurePreferencesForUsers) {
+      await notificationsRepository.ensurePreferencesForUsers(
+        userIds,
+        DEFAULT_PREFERENCES,
+      );
+      return;
+    }
+
+    await Promise.all(userIds.map((userId) => ensurePreferences(userId)));
+  }
+
+  async function getPreferencesMapForUsers(userIds) {
+    if (userIds.length === 0) {
+      return new Map();
+    }
+
+    if (notificationsRepository.getPreferencesByUserIds) {
+      const rows = await notificationsRepository.getPreferencesByUserIds(userIds);
+      const map = new Map();
+      for (const row of rows) {
+        map.set(row.user_id, toPreferences(row));
+      }
+      return map;
+    }
+
+    const pairs = await Promise.all(
+      userIds.map(async (userId) => [userId, await getPreferences(userId)]),
+    );
+    return new Map(pairs);
+  }
+
+  async function getRecipientMapForUsers(userIds) {
+    if (userIds.length === 0) {
+      return new Map();
+    }
+
+    if (notificationsRepository.findRecipientContactsByUserIds) {
+      const rows = await notificationsRepository.findRecipientContactsByUserIds(
+        userIds,
+      );
+      const map = new Map();
+      for (const row of rows) {
+        map.set(row.id, toRecipientContact(row));
+      }
+      return map;
+    }
+
+    const pairs = await Promise.all(
+      userIds.map(async (userId) => [
+        userId,
+        toRecipientContact(
+          await notificationsRepository.findRecipientContact(userId),
+        ),
+      ]),
+    );
+    return new Map(pairs);
   }
 
   async function listForUser({ userId, query }) {
@@ -97,18 +166,13 @@ function createNotificationsService({
     return toPreferences(updated);
   }
 
-  async function createSystemNotification({
+  async function queueNotification({
     recipientUserId,
-    channel = "email",
+    channel,
     title,
     body,
-    metadata = {},
+    metadata,
   }) {
-    const preferences = await getPreferences(recipientUserId);
-    if (!channelAllowed(preferences, channel)) {
-      return null;
-    }
-
     const created = await notificationsRepository.createNotification({
       recipientUserId,
       channel,
@@ -149,6 +213,67 @@ function createNotificationsService({
     }
 
     return toNotification(created);
+  }
+
+  async function createBulkSystemNotifications({
+    recipientUserIds,
+    channel = "email",
+    title,
+    body,
+    metadata = {},
+  }) {
+    const uniqueRecipients = uniqueUserIds(recipientUserIds);
+    if (uniqueRecipients.length === 0) {
+      return [];
+    }
+
+    await ensurePreferencesForUsers(uniqueRecipients);
+    const [preferencesMap, recipientMap] = await Promise.all([
+      getPreferencesMapForUsers(uniqueRecipients),
+      getRecipientMapForUsers(uniqueRecipients),
+    ]);
+
+    const deliverableRecipients = uniqueRecipients.filter((recipientUserId) => {
+      const preferences = preferencesMap.get(recipientUserId);
+      if (!preferences) {
+        return false;
+      }
+      if (!channelAllowed(preferences, channel)) {
+        return false;
+      }
+      return Boolean(recipientMap.get(recipientUserId));
+    });
+
+    const created = await Promise.all(
+      deliverableRecipients.map((recipientUserId) =>
+        queueNotification({
+          recipientUserId,
+          channel,
+          title,
+          body,
+          metadata,
+        }),
+      ),
+    );
+
+    return created.filter(Boolean);
+  }
+
+  async function createSystemNotification({
+    recipientUserId,
+    channel = "email",
+    title,
+    body,
+    metadata = {},
+  }) {
+    const created = await createBulkSystemNotifications({
+      recipientUserIds: [recipientUserId],
+      channel,
+      title,
+      body,
+      metadata,
+    });
+    return created[0] ?? null;
   }
 
   async function dispatchNotification({
@@ -233,6 +358,7 @@ function createNotificationsService({
     listForUser,
     getPreferences,
     updatePreferences,
+    createBulkSystemNotifications,
     createSystemNotification,
     dispatchNotification,
     processDispatchJob,
