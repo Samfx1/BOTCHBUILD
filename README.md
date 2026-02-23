@@ -6,8 +6,10 @@ investment application that supports:
 - Investor/developer account onboarding
 - JWT authentication + TOTP 2FA
 - Project creation and progress tracking
-- Investment creation and payment initialization (Stripe/Paystack-ready)
-- Notification feeds and channel preferences
+- Investment creation and payment initialization (Stripe/Paystack adapters)
+- Signed Stripe/Paystack webhook processing
+- Media upload target pipeline (local/S3/Cloudinary)
+- Notification feeds, preferences, and provider adapters (email/SMS/WhatsApp)
 - PostgreSQL-backed domain schema
 - Dockerized local development
 
@@ -105,6 +107,15 @@ npm run dev --prefix frontend
 - `GET /api/v1/payments/:transactionId`
 - `POST /api/v1/payments/webhook/:provider`
 
+Webhook signatures:
+
+- Stripe: `stripe-signature`
+- Paystack: `x-paystack-signature`
+
+### Media
+
+- `POST /api/v1/media/upload-target` (developer/admin)
+
 ### Notifications
 
 - `GET /api/v1/notifications/me`
@@ -136,3 +147,4 @@ Current baseline migration:
 
 - `docs/PHASE1_FOUNDATION.md`
 - `docs/PHASE2_CORE_MODULES.md`
+- `docs/PHASE2_INTEGRATIONS.md`

@@ -1,3 +1,5 @@
+const { createNotificationDispatcher } = require("./notification.dispatcher");
+
 const DEFAULT_PREFERENCES = {
   emailEnabled: true,
   smsEnabled: false,
@@ -40,7 +42,24 @@ function channelAllowed(preferences, channel) {
   return false;
 }
 
-function createNotificationsService({ notificationsRepository }) {
+function toRecipientContact(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    userId: row.id,
+    fullName: row.full_name,
+    email: row.email,
+    phoneNumber: row.phone_number,
+  };
+}
+
+function createNotificationsService({
+  notificationsRepository,
+  env,
+  notificationDispatcher = createNotificationDispatcher({ env }),
+}) {
   async function ensurePreferences(userId) {
     const existing = await notificationsRepository.getPreferencesByUserId(userId);
     if (existing) {
@@ -87,13 +106,37 @@ function createNotificationsService({ notificationsRepository }) {
       return null;
     }
 
+    const recipient = toRecipientContact(
+      await notificationsRepository.findRecipientContact(recipientUserId),
+    );
+
+    let deliveryResult;
+    try {
+      deliveryResult = await notificationDispatcher.send({
+        channel,
+        recipient,
+        title,
+        body,
+        metadata,
+      });
+    } catch (error) {
+      deliveryResult = {
+        status: "failed",
+        provider: channel,
+        error: error.message ?? "Notification dispatch failed.",
+      };
+    }
+
     const created = await notificationsRepository.createNotification({
       recipientUserId,
       channel,
       title,
       body,
-      status: "sent",
-      metadata,
+      status: deliveryResult.status === "sent" ? "sent" : "failed",
+      metadata: {
+        ...metadata,
+        delivery: deliveryResult,
+      },
     });
     return toNotification(created);
   }

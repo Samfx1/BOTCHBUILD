@@ -1,4 +1,4 @@
-const { randomUUID } = require("node:crypto");
+const { createHmac, randomUUID } = require("node:crypto");
 const request = require("supertest");
 const { createApp } = require("../src/app");
 
@@ -152,6 +152,7 @@ class InMemoryInvestmentsRepository {
       id: randomUUID(),
       project_id: projectId,
       investor_user_id: investorUserId,
+      investor_email: "investor@example.com",
       amount: String(amount),
       currency,
       status: "pending",
@@ -183,6 +184,7 @@ class InMemoryInvestmentsRepository {
     }
     return {
       ...investment,
+      investor_email: investment.investor_email,
       project_title: "Airport Hills Residential Phase A",
       project_owner_user_id: randomUUID(),
       project_status: "in_progress",
@@ -282,9 +284,10 @@ class InMemoryPaymentsRepository {
 }
 
 class InMemoryNotificationsRepository {
-  constructor() {
+  constructor({ authRepository }) {
     this.notifications = [];
     this.preferences = new Map();
+    this.authRepository = authRepository;
   }
 
   async listForUser(userId, { limit, offset }) {
@@ -343,6 +346,20 @@ class InMemoryNotificationsRepository {
     this.preferences.set(userId, updated);
     return updated;
   }
+
+  async findRecipientContact(userId) {
+    const user = this.authRepository.users.get(userId);
+    if (!user) {
+      return null;
+    }
+
+    return {
+      id: user.id,
+      full_name: user.full_name,
+      email: user.email,
+      phone_number: "+233200000000",
+    };
+  }
 }
 
 describe("Phase 2 core routes", () => {
@@ -351,7 +368,9 @@ describe("Phase 2 core routes", () => {
     const projectsRepository = new InMemoryProjectsRepository();
     const investmentsRepository = new InMemoryInvestmentsRepository();
     const paymentsRepository = new InMemoryPaymentsRepository();
-    const notificationsRepository = new InMemoryNotificationsRepository();
+    const notificationsRepository = new InMemoryNotificationsRepository({
+      authRepository,
+    });
 
     const app = createApp({
       authRepository,
@@ -414,22 +433,45 @@ describe("Phase 2 core routes", () => {
     expect(initializePayment.status).toBe(201);
     expect(initializePayment.body.providerReference).toContain("paystack_");
 
+    const webhookPayload = JSON.stringify({
+      event: "charge.success",
+      data: {
+        reference: initializePayment.body.providerReference,
+        status: "success",
+        paid_at: new Date().toISOString(),
+      },
+    });
+    const webhookSignature = createHmac("sha512", "paystack_dev_secret")
+      .update(webhookPayload)
+      .digest("hex");
+
     const webhookResult = await request(app)
       .post("/api/v1/payments/webhook/paystack")
-      .set("x-webhook-secret", "local-dev-webhook-secret")
-      .send({
-        providerReference: initializePayment.body.providerReference,
-        status: "succeeded",
-      });
+      .set("Content-Type", "application/json")
+      .set("x-paystack-signature", webhookSignature)
+      .send(webhookPayload);
     expect(webhookResult.status).toBe(200);
-    expect(webhookResult.body.transaction.status).toBe("succeeded");
+    expect(webhookResult.body.result.status).toBe("succeeded");
+
+    const uploadTarget = await request(app)
+      .post("/api/v1/media/upload-target")
+      .set("Authorization", `Bearer ${developerRegister.body.accessToken}`)
+      .send({
+        mediaType: "photo",
+        fileName: "update-001.jpg",
+        contentType: "image/jpeg",
+        projectId: createProject.body.id,
+      });
+    expect(uploadTarget.status).toBe(201);
+    expect(uploadTarget.body.provider).toBe("local");
+    expect(uploadTarget.body.publicUrl).toContain("/uploads/");
 
     const postUpdate = await request(app)
       .post(`/api/v1/projects/${createProject.body.id}/updates`)
       .set("Authorization", `Bearer ${developerRegister.body.accessToken}`)
       .send({
         mediaType: "photo",
-        mediaUrl: "https://cdn.botchbuild.dev/progress/update-001.jpg",
+        mediaUrl: uploadTarget.body.publicUrl,
         caption: "Concrete works completed for block A.",
       });
     expect(postUpdate.status).toBe(201);

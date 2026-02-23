@@ -1,5 +1,6 @@
 const { randomUUID } = require("node:crypto");
 const { HttpError } = require("../../utils/httpError");
+const { createPaymentsGateway } = require("./gateways");
 
 function createProviderReference(provider) {
   const compact = Date.now().toString(36);
@@ -42,6 +43,7 @@ function createPaymentsService({
   paymentsRepository,
   investmentsRepository,
   notificationsService,
+  paymentsGateway = createPaymentsGateway({ env }),
 }) {
   async function initializePayment({ actor, input }) {
     const investment = await investmentsRepository.findInvestmentById(input.investmentId);
@@ -63,7 +65,17 @@ function createPaymentsService({
     }
 
     const providerReference = createProviderReference(input.provider);
-    const checkoutUrl = `${env.FRONTEND_URL}/payments/checkout/${providerReference}`;
+    const initialized = await paymentsGateway.initialize(input.provider, {
+      amount: Number(investment.amount),
+      currency: investment.currency,
+      customerEmail: investment.investor_email,
+      providerReference,
+      metadata: {
+        investmentId: investment.id,
+        projectId: investment.project_id,
+      },
+    });
+
     const transaction = await paymentsRepository.createTransaction({
       investmentId: investment.id,
       provider: input.provider,
@@ -71,11 +83,13 @@ function createPaymentsService({
       amount: Number(investment.amount),
       currency: investment.currency,
       metadata: {
-        source: "phase2-initialize",
+        source: "phase2-provider-initialize",
         provider: input.provider,
+        externalReference: initialized.externalReference,
+        ...initialized.metadata,
       },
       initiatedBy: actor.id,
-      providerCheckoutUrl: checkoutUrl,
+      providerCheckoutUrl: initialized.checkoutUrl,
       idempotencyKey: randomUUID(),
     });
 
@@ -114,13 +128,31 @@ function createPaymentsService({
     return toPaymentTransaction(transaction);
   }
 
-  async function handleWebhook({ provider, webhookSecret, input }) {
-    if (webhookSecret !== env.PAYMENT_WEBHOOK_SECRET) {
-      throw new HttpError(401, "Invalid webhook secret.");
+  function normalizeRawPayload(rawPayload) {
+    if (Buffer.isBuffer(rawPayload)) {
+      return rawPayload;
+    }
+    if (typeof rawPayload === "string") {
+      return Buffer.from(rawPayload, "utf-8");
+    }
+    return Buffer.from(JSON.stringify(rawPayload ?? {}), "utf-8");
+  }
+
+  async function handleWebhook({ provider, rawPayload, headers = {} }) {
+    const parsedWebhook = paymentsGateway.parseWebhook(provider, {
+      rawBody: normalizeRawPayload(rawPayload),
+      headers,
+    });
+
+    if (!parsedWebhook) {
+      return {
+        ignored: true,
+        reason: "Event not mapped to a payment transaction state change.",
+      };
     }
 
     const transaction = await paymentsRepository.findByProviderReference(
-      input.providerReference,
+      parsedWebhook.providerReference,
     );
     if (!transaction) {
       throw new HttpError(404, "Payment transaction not found.");
@@ -132,15 +164,20 @@ function createPaymentsService({
 
     const updatedTransaction = await paymentsRepository.updateTransactionStatus({
       transactionId: transaction.id,
-      status: input.status,
+      status: parsedWebhook.status,
       metadata: {
-        ...input.metadata,
+        ...parsedWebhook.metadata,
         webhookProvider: provider,
       },
-      paidAt: input.status === "succeeded" ? input.paidAt ?? new Date().toISOString() : null,
+      paidAt:
+        parsedWebhook.status === "succeeded"
+          ? parsedWebhook.paidAt ?? new Date().toISOString()
+          : null,
     });
 
-    const nextInvestmentStatus = investmentStatusFromPaymentStatus(input.status);
+    const nextInvestmentStatus = investmentStatusFromPaymentStatus(
+      parsedWebhook.status,
+    );
     await investmentsRepository.updateInvestmentStatus({
       investmentId: transaction.investment_id,
       status: nextInvestmentStatus,
@@ -151,11 +188,11 @@ function createPaymentsService({
         recipientUserId: transaction.investor_user_id,
         channel: "email",
         title: "Payment status updated",
-        body: `Your payment is now "${input.status}".`,
+        body: `Your payment is now "${parsedWebhook.status}".`,
         metadata: {
           transactionId: transaction.id,
           providerReference: transaction.provider_reference,
-          status: input.status,
+          status: parsedWebhook.status,
         },
       });
     }

@@ -115,3 +115,27 @@ export type NotificationPreferences = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type UploadInstruction =
+  | {
+      method: "PUT";
+      url: string;
+      headers?: Record<string, string>;
+    }
+  | {
+      method: "POST";
+      url: string;
+      fields?: Record<string, string>;
+    };
+
+export type MediaUploadTarget = {
+  provider: "local" | "s3" | "cloudinary";
+  key: string;
+  upload: UploadInstruction | null;
+  publicUrl: string;
+  expiresInSeconds: number;
+  note?: string;
+  requestedBy: string;
+  mediaType: "photo" | "video";
+  contentType: string;
+};

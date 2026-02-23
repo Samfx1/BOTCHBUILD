@@ -76,6 +76,7 @@ class PostgresInvestmentsRepository {
         i.id,
         i.project_id,
         i.investor_user_id,
+        u.email AS investor_email,
         i.amount,
         i.currency,
         i.status,
@@ -86,6 +87,7 @@ class PostgresInvestmentsRepository {
         p.status AS project_status
       FROM investments i
       INNER JOIN projects p ON p.id = i.project_id
+      INNER JOIN users u ON u.id = i.investor_user_id
       WHERE i.id = $1;
     `;
     const result = await this.pool.query(query, [investmentId]);

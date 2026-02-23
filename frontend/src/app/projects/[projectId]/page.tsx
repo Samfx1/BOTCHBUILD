@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { apiRequest, ApiError } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/auth";
-import type { Project, ProjectUpdate, User } from "@/lib/types";
+import type { MediaUploadTarget, Project, ProjectUpdate, User } from "@/lib/types";
 
 type UpdatesResponse = {
   updates: ProjectUpdate[];
@@ -20,7 +20,10 @@ export default function ProjectDetailPage() {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [updateForm, setUpdateForm] = useState({
     mediaType: "photo",
     mediaUrl: "",
@@ -67,9 +70,84 @@ export default function ProjectDetailPage() {
     loadProject();
   }, [projectId]);
 
+  async function uploadFileToTarget(target: MediaUploadTarget, file: File) {
+    if (!target.upload) {
+      return;
+    }
+
+    if (target.upload.method === "PUT") {
+      const response = await fetch(target.upload.url, {
+        method: "PUT",
+        headers: target.upload.headers ?? {},
+        body: file,
+      });
+      if (!response.ok) {
+        throw new Error("Upload to signed PUT URL failed.");
+      }
+      return;
+    }
+
+    const formData = new FormData();
+    Object.entries(target.upload.fields ?? {}).forEach(([key, value]) => {
+      formData.append(key, value);
+    });
+    formData.append("file", file);
+
+    const response = await fetch(target.upload.url, {
+      method: "POST",
+      body: formData,
+    });
+    if (!response.ok) {
+      throw new Error("Upload to signed POST target failed.");
+    }
+  }
+
+  async function handlePrepareUpload() {
+    if (!selectedFile) {
+      setError("Choose a file first.");
+      return;
+    }
+
+    setError(null);
+    setMessage(null);
+    setIsUploading(true);
+    try {
+      const target = await apiRequest<MediaUploadTarget>("/media/upload-target", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          mediaType: updateForm.mediaType,
+          fileName: selectedFile.name,
+          contentType: selectedFile.type || "application/octet-stream",
+          projectId,
+        }),
+      });
+
+      await uploadFileToTarget(target, selectedFile);
+      setUpdateForm((prev) => ({
+        ...prev,
+        mediaUrl: target.publicUrl,
+      }));
+      setMessage(
+        target.upload
+          ? `File uploaded via ${target.provider}. Media URL populated.`
+          : `Upload target prepared via ${target.provider}. Use returned URL once file is hosted.`,
+      );
+    } catch (requestError) {
+      if (requestError instanceof ApiError) {
+        setError(requestError.message);
+      } else {
+        setError("Could not prepare/upload file.");
+      }
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
   async function handlePostUpdate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    setMessage(null);
     setIsSubmitting(true);
 
     try {
@@ -115,6 +193,11 @@ export default function ProjectDetailPage() {
       {error ? (
         <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-200">
           {error}
+        </p>
+      ) : null}
+      {message ? (
+        <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200">
+          {message}
         </p>
       ) : null}
 
@@ -178,6 +261,28 @@ export default function ProjectDetailPage() {
               }
               required
             />
+            <div className="md:col-span-2 rounded-md border border-slate-200 p-3 dark:border-slate-700">
+              <p className="mb-2 text-xs text-slate-500">
+                Optional: upload via backend-generated target (S3/Cloudinary/local adapter)
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="file"
+                  onChange={(event) =>
+                    setSelectedFile(event.target.files?.[0] ?? null)
+                  }
+                  className="text-sm"
+                />
+                <button
+                  type="button"
+                  disabled={isUploading}
+                  onClick={handlePrepareUpload}
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold hover:bg-slate-100 disabled:opacity-70 dark:border-slate-700 dark:hover:bg-slate-800"
+                >
+                  {isUploading ? "Preparing upload..." : "Prepare/upload file"}
+                </button>
+              </div>
+            </div>
             <textarea
               className="md:col-span-2 rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
               rows={3}

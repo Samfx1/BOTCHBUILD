@@ -1,7 +1,6 @@
 const {
   initializePaymentSchema,
   paymentTransactionParamSchema,
-  paymentWebhookSchema,
 } = require("./payments.validation");
 
 function createPaymentsController({ paymentsService }) {
@@ -30,15 +29,14 @@ function createPaymentsController({ paymentsService }) {
   }
 
   async function handleWebhook(req, res) {
-    const input = paymentWebhookSchema.parse(req.body);
-    const transaction = await paymentsService.handleWebhook({
+    const result = await paymentsService.handleWebhook({
       provider: req.params.provider,
-      webhookSecret: req.headers["x-webhook-secret"],
-      input,
+      rawPayload: req.body,
+      headers: req.headers,
     });
     return res.status(200).json({
       ok: true,
-      transaction,
+      result,
     });
   }
 

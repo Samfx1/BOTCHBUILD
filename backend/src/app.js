@@ -15,6 +15,8 @@ const { createHealthRouter } = require("./modules/health/health.routes");
 const { PostgresInvestmentsRepository } = require("./modules/investments/investments.repository");
 const { createInvestmentsRouter } = require("./modules/investments/investments.routes");
 const { createInvestmentsService } = require("./modules/investments/investments.service");
+const { createMediaRouter } = require("./modules/media/media.routes");
+const { createMediaService } = require("./modules/media/media.service");
 const { PostgresNotificationsRepository } = require("./modules/notifications/notifications.repository");
 const { createNotificationsRouter } = require("./modules/notifications/notifications.routes");
 const { createNotificationsService } = require("./modules/notifications/notifications.service");
@@ -41,11 +43,17 @@ function createApp(options = {}) {
   const authService = createAuthService({ authRepository });
   const notificationsService = createNotificationsService({
     notificationsRepository,
+    env,
+    notificationDispatcher: options.notificationDispatcher,
   });
   const projectsService = createProjectsService({
     projectsRepository,
     investmentsRepository,
     notificationsService,
+  });
+  const mediaService = createMediaService({
+    env,
+    mediaStorageAdapter: options.mediaStorageAdapter,
   });
   const investmentsService = createInvestmentsService({
     investmentsRepository,
@@ -57,6 +65,7 @@ function createApp(options = {}) {
     paymentsRepository,
     investmentsRepository,
     notificationsService,
+    paymentsGateway: options.paymentsGateway,
   });
 
   const app = express();
@@ -77,6 +86,13 @@ function createApp(options = {}) {
     }),
   );
   app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
+  app.use(
+    "/api/v1/payments/webhook",
+    express.raw({
+      type: "application/json",
+      limit: "2mb",
+    }),
+  );
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
 
@@ -84,7 +100,7 @@ function createApp(options = {}) {
     res.json({
       service: "botchbuild-api",
       status: "ok",
-      phase: "phase-2-core-modules",
+      phase: "phase-2-integrations",
     });
   });
 
@@ -92,6 +108,7 @@ function createApp(options = {}) {
   app.use("/api/v1/auth", createAuthRouter({ authService }));
   app.use("/api/v1/users", createUserRouter({ authRepository }));
   app.use("/api/v1/projects", createProjectsRouter({ projectsService }));
+  app.use("/api/v1/media", createMediaRouter({ mediaService }));
   app.use(
     "/api/v1/investments",
     createInvestmentsRouter({ investmentsService }),
