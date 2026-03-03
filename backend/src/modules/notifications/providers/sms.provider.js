@@ -1,0 +1,77 @@
+function createSmsProvider({ env }) {
+  const hasTwilioConfig =
+    Boolean(env.TWILIO_ACCOUNT_SID) &&
+    Boolean(env.TWILIO_AUTH_TOKEN) &&
+    Boolean(env.TWILIO_SMS_FROM);
+
+  async function send({ recipient, body, metadata = {} }) {
+    if (!recipient?.phoneNumber) {
+      return {
+        status: "failed",
+        provider: "sms",
+        error: "Recipient phone number is missing.",
+      };
+    }
+
+    if (!hasTwilioConfig) {
+      return {
+        status: "sent",
+        provider: "sms",
+        providerMessageId: `mock-sms-${Date.now()}`,
+        metadata: {
+          dryRun: true,
+          reason: "Twilio SMS configuration missing.",
+          ...metadata,
+        },
+      };
+    }
+
+    const form = new URLSearchParams({
+      To: recipient.phoneNumber,
+      From: env.TWILIO_SMS_FROM,
+      Body: body,
+    });
+
+    const credentials = Buffer.from(
+      `${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`,
+    ).toString("base64");
+
+    const response = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID}/Messages.json`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: form.toString(),
+      },
+    );
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return {
+        status: "failed",
+        provider: "sms",
+        error: payload.message ?? "Twilio SMS send failed.",
+      };
+    }
+
+    return {
+      status: "sent",
+      provider: "sms",
+      providerMessageId: payload.sid ?? null,
+      metadata: {
+        twilioStatus: payload.status ?? null,
+      },
+    };
+  }
+
+  return {
+    send,
+  };
+}
+
+module.exports = {
+  createSmsProvider,
+};

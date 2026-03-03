@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: botchbuild
+          POSTGRES_USER: botchbuild
+          POSTGRES_PASSWORD: botchbuild
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U botchbuild -d botchbuild"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      NODE_ENV: test
+      PORT: 4000
+      DATABASE_URL: postgresql://botchbuild:botchbuild@localhost:5432/botchbuild
+      BACKEND_PUBLIC_URL: http://localhost:4000
+      FRONTEND_URL: http://localhost:3000
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      LOG_LEVEL: info
+      JWT_ACCESS_SECRET: ci-access-secret-value-with-at-least-32-chars
+      JWT_2FA_SECRET: ci-2fa-secret-value-with-at-least-32-chars
+      PAYMENT_WEBHOOK_SECRET: ci-payment-webhook-secret
+      PAYSTACK_SECRET_KEY: paystack_dev_secret
+      OPS_WORKER_POLL_MS: 5000
+      OPS_WORKER_BATCH_SIZE: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
+
+      - name: Run database migrations
+        run: npm run migrate --prefix backend
+
+      - name: Run backend tests
+        run: npm run test --prefix backend
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Run frontend tests
+        run: npm run test --prefix frontend
+
+      - name: Lint frontend
+        run: npm run lint --prefix frontend
+
+      - name: Build frontend
+        run: npm run build --prefix frontend

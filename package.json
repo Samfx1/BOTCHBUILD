@@ -1,0 +1,29 @@
+{
+  "name": "botchbuild-platform",
+  "version": "1.0.0",
+  "description": "Secure real estate investment platform foundation",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev:frontend": "npm run dev --workspace frontend",
+    "dev:backend": "npm run dev --workspace backend",
+    "dev": "npm run dev:frontend",
+    "preview": "bash ./scripts/preview.sh",
+    "test": "npm run test --workspace frontend && npm run test --workspace backend",
+    "lint": "npm run lint --workspace frontend"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Samfx1/BOTCHBUILD.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Samfx1/BOTCHBUILD/issues"
+  },
+  "homepage": "https://github.com/Samfx1/BOTCHBUILD#readme"
+}
